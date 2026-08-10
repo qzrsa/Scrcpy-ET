@@ -116,4 +116,26 @@
   <string name="toast_stream_closed">连接断开</string>
   <string name="toast_float_per">需要悬浮窗权限</string>
 
+  <!-- EasyTier -->
+  <string name="easytier_title">EasyTier P2P 网络</string>
+  <string name="easytier_enable">开启 EasyTier</string>
+  <string name="easytier_enable_detail">启用后连接设备时自动建立 P2P 隧道，无需同局域网</string>
+  <string name="easytier_secret">连接密码</string>
+  <string name="easytier_secret_hint">填写连接密码，与对端一致</string>
+  <string name="easytier_network_name">网络名称</string>
+  <string name="easytier_network_name_hint">填写网络名称</string>
+  <string name="easytier_port">监听端口</string>
+  <string name="easytier_port_hint">11010</string>
+  <string name="easytier_use_public">连接公网节点</string>
+  <string name="easytier_use_public_detail">关闭后仅支持局域网直连，适合双方在同一网络</string>
+  <string name="easytier_status">状态</string>
+  <string name="easytier_vpn_ip">本机 VPN IP</string>
+  <string name="easytier_action">操作</string>
+  <string name="easytier_start">启动</string>
+  <string name="easytier_stop">停止</string>
+  <string name="easytier_download_success">EasyTier 下载成功</string>
+  <string name="easytier_started">EasyTier 已启动</string>
+  <string name="easytier_stopped">EasyTier 已停止</string>
+  <string name="easytier_copy_ip">VPN IP 已复制</string>
+  <string name="easytier_need_permission">需要先在设置中填写连接密码</string>
 </resources>

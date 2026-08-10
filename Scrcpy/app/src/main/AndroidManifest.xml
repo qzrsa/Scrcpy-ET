@@ -46,6 +46,9 @@
       android:name=".AdbKeyActivity"
       android:exported="false" />
     <activity
+      android:name=".easytier.EasyTierActivity"
+      android:exported="false" />
+    <activity
       android:name=".ActiveActivity"
       android:exported="false" />
     <activity

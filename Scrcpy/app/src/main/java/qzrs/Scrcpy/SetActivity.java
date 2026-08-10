@@ -6,6 +6,7 @@ import android.os.Bundle;
 import android.widget.Toast;
 
 import qzrs.Scrcpy.databinding.ActivitySetBinding;
+import qzrs.Scrcpy.easytier.EasyTierActivity;
 import qzrs.Scrcpy.entity.AppData;
 import qzrs.Scrcpy.helper.PublicTools;
 import qzrs.Scrcpy.helper.ViewTools;
@@ -30,7 +31,8 @@ public class SetActivity extends Activity {
       AppData.keyPair = PublicTools.reGenerateAdbKeyPair();
       Toast.makeText(this, getString(R.string.toast_success), Toast.LENGTH_SHORT).show();
     }).getRoot());
-   }
+    activitySetBinding.setOther.addView(ViewTools.createTextCard(this, getString(R.string.easytier_title), () -> startActivity(new Intent(this, EasyTierActivity.class))).getRoot());
+  }
 
   private void setButtonListener() {
     activitySetBinding.backButton.setOnClickListener(v -> finish());
