@@ -226,7 +226,7 @@ public class EasyTierManager {
 
         // 生成配置
         File confFile = getConfigFile();
-        String conf = buildConfig(secret, networkName, port, usePublic);
+        String conf = buildConfig(secret, networkName, port, usePublic, server);
         writeFile(confFile, conf);
 
         logLine("[EasyTier] 正在启动...");
@@ -289,7 +289,7 @@ public class EasyTierManager {
     }
   }
 
-  private String buildConfig(String secret, String networkName, int port, boolean usePublic) {
+  private String buildConfig(String secret, String networkName, int port, boolean usePublic, String server) {
     StringBuilder sb = new StringBuilder();
     sb.append("instance_secret = \"").append(secret).append("\"\n");
     sb.append("protocol_name = \"").append(networkName).append("\"\n");
