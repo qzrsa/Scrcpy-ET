@@ -370,7 +370,8 @@ public class EasyTierManager {
           }
 
           // 解析 tun 虚拟 IP（优先：这是本机真实获得的网卡地址）
-          Matcher m = Pattern.compile("(?:tun0|tun|easytier0)[^\\d]*(\\d+\\.\\d+\\.\\d+\\.\\d+)").matcher(line);
+          // 匹配包含 tun0/tun/easytier0+IP，或 "ip" 关键字+IP（v2.6.4可能输出格式不同）
+          Matcher m = Pattern.compile("(?:(?:tun0|tun|easytier0)[^\\d]*|virtual[_-]?ip[^\\d]*|ip[^\\d]*)(\\d+\\.\\d+\\.\\d+\\.\\d+)").matcher(line);
           if (m.find()) {
             currentVpnIp = m.group(1);
             if (!ipFound) {
@@ -441,27 +442,35 @@ public class EasyTierManager {
   private String buildConfig(String secret, String networkName, int port, boolean usePublic, String server,
                              boolean dhcpEnabled, String virtualIp) {
     StringBuilder sb = new StringBuilder();
-    sb.append("instance_secret = \"").append(secret).append("\"\n");
-    sb.append("protocol_name = \"").append(networkName).append("\"\n");
-    sb.append("listen_port = ").append(port).append("\n");
-    // 代理模式：提供本地 SOCKS5，无需 root/无需创建 tun 设备
-    sb.append("socks5 = [\"127.0.0.1:1080\"]\n");
-
-    // 虚拟 IPv4 配置：DHCP 或手动指定
-    if (!dhcpEnabled && virtualIp != null && !virtualIp.trim().isEmpty()) {
-      // 必须显式关闭 DHCP，否则 EasyTier 走 DHCP 自动分配并忽略手设 ipv4
-      sb.append("dhcp = false\n");
-      sb.append("ipv4 = \"").append(virtualIp.trim()).append("\"\n");
+    // 实例段
+    sb.append("instance_name = \"default\"\n");
+    sb.append("ipv4 = \"").append((!dhcpEnabled && virtualIp != null && !virtualIp.trim().isEmpty())
+        ? virtualIp.trim() : "10.126.126.241").append("\"\n");
+    sb.append("dhcp = ").append(dhcpEnabled ? "true" : "false").append("\n");
+    sb.append("listeners = []\n");
+    sb.append("mapped_listeners = []\n");
+    sb.append("exit_nodes = []\n");
+    sb.append("rpc_portal = \"127.0.0.1:15888\"\n");
+    sb.append("\n");
+    // 网络身份段
+    sb.append("[network_identity]\n");
+    sb.append("network_name = \"").append(networkName).append("\"\n");
+    sb.append("network_secret = \"").append(secret).append("\"\n");
+    sb.append("\n");
+    // 公网中继节点段
+    if (usePublic && server != null && !server.trim().isEmpty()) {
+      sb.append("[[peer]]\n");
+      sb.append("uri = \"").append(server.trim()).append("\"\n");
+      sb.append("\n");
     }
-
-    if (usePublic) {
-      if (server != null && !server.trim().isEmpty()) {
-        sb.append("server = [\"").append(server.trim()).append("\"]\n");
-      }
-    }
+    // 高级 flags 段：tun 网卡 + 本地 SOCKS5
+    sb.append("[flags]\n");
+    sb.append("dev_name = \"tun0\"\n");
+    sb.append("socks5 = [\"socks5://0.0.0.0:1080\"]\n");
+    sb.append("disable_tun = false\n");
     sb.append("enable_ipv6 = false\n");
-    sb.append("compression = 1\n");
-    sb.append("encryption = 1\n");
+    sb.append("compression = \"zstd\"\n");
+    sb.append("encryption = \"aes-gcm\"\n");
     return sb.toString();
   }
 
