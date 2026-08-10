@@ -46,6 +46,7 @@ public class EasyTierActivity extends Activity implements EasyTierManager.Status
     binding.editSecret.setText(AppData.setting.getEasyTierSecret());
     binding.editNetworkName.setText(AppData.setting.getEasyTierNetworkName());
     binding.editPort.setText(String.valueOf(AppData.setting.getEasyTierPort()));
+    binding.editServer.setText(AppData.setting.getEasyTierServer());
     binding.switchPublic.setChecked(AppData.setting.getEasyTierUsePublic());
 
     updateConfigArea();
@@ -68,12 +69,14 @@ public class EasyTierActivity extends Activity implements EasyTierManager.Status
       String secret = binding.editSecret.getText().toString().trim();
       String networkName = binding.editNetworkName.getText().toString().trim();
       String portStr = binding.editPort.getText().toString().trim();
+      String server = binding.editServer.getText().toString().trim();
       int port = 11010;
       try { port = Integer.parseInt(portStr); } catch (Exception ignored) {}
 
       AppData.setting.setEasyTierSecret(secret);
       AppData.setting.setEasyTierNetworkName(networkName.isEmpty() ? "scrcpy-et" : networkName);
       AppData.setting.setEasyTierPort(port);
+      AppData.setting.setEasyTierServer(server);
       AppData.setting.setEasyTierUsePublic(binding.switchPublic.isChecked());
 
       Toast.makeText(this, getString(R.string.toast_success), Toast.LENGTH_SHORT).show();
@@ -116,6 +119,14 @@ public class EasyTierActivity extends Activity implements EasyTierManager.Status
 
     binding.switchPublic.setOnCheckedChangeListener((v, checked) -> {
       AppData.setting.setEasyTierUsePublic(checked);
+    });
+
+    binding.editServer.addTextChangedListener(new TextWatcher() {
+      public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+      public void onTextChanged(CharSequence s, int start, int before, int count) {}
+      public void afterTextChanged(Editable s) {
+        AppData.setting.setEasyTierServer(s.toString());
+      }
     });
   }
 

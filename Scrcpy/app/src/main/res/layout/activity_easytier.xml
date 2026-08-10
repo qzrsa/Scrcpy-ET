@@ -172,6 +172,24 @@
           android:textColor="@color/onCardBackgroundSecond"
           android:textSize="@dimen/smallSmallFont" />
 
+        <!-- 服务器地址 -->
+        <TextView
+          android:layout_width="match_parent"
+          android:layout_height="wrap_content"
+          android:layout_marginTop="10dp"
+          android:text="@string/easytier_server"
+          android:textColor="@color/onCardBackground"
+          android:textSize="@dimen/middleFont" />
+
+        <EditText
+          android:id="@+id/edit_server"
+          android:layout_width="match_parent"
+          android:layout_height="wrap_content"
+          android:hint="@string/easytier_server_hint"
+          android:textColor="@color/onCardBackground"
+          android:textColorHint="@color/onCardBackgroundSecond"
+          android:textSize="@dimen/smallFont" />
+
         <!-- 保存按钮 -->
         <Button
           android:id="@+id/btn_save"

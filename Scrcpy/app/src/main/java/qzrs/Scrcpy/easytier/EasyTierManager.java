@@ -222,6 +222,7 @@ public class EasyTierManager {
         String networkName = AppData.setting.getEasyTierNetworkName();
         int port = AppData.setting.getEasyTierPort();
         boolean usePublic = AppData.setting.getEasyTierUsePublic();
+        String server = AppData.setting.getEasyTierServer();
 
         // 生成配置
         File confFile = getConfigFile();
@@ -294,7 +295,9 @@ public class EasyTierManager {
     sb.append("protocol_name = \"").append(networkName).append("\"\n");
     sb.append("listen_port = ").append(port).append("\n");
     if (usePublic) {
-      sb.append("server = [\"public.easytier.example.com\"]\n");
+      if (server != null && !server.trim().isEmpty()) {
+        sb.append("server = [\"").append(server.trim()).append("\"]\n");
+      }
     }
     sb.append("enable_ipv6 = false\n");
     sb.append("compression = 1\n");

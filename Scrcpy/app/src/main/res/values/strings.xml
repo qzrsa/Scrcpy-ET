@@ -128,6 +128,8 @@
   <string name="easytier_port_hint">11010</string>
   <string name="easytier_use_public">连接公网节点</string>
   <string name="easytier_use_public_detail">关闭后仅支持局域网直连，适合双方在同一网络</string>
+  <string name="easytier_server">服务器地址</string>
+  <string name="easytier_server_hint">如 public.easytier.example.com（留空使用默认）</string>
   <string name="easytier_status">状态</string>
   <string name="easytier_vpn_ip">本机 VPN IP</string>
   <string name="easytier_action">操作</string>

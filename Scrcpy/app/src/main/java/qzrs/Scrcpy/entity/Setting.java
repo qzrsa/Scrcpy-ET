@@ -55,6 +55,15 @@ public final class Setting {
     editor.apply();
   }
 
+  public String getEasyTierServer() {
+    return sharedPreferences.getString("easytier_server", "");
+  }
+
+  public void setEasyTierServer(String value) {
+    editor.putString("easytier_server", value);
+    editor.apply();
+  }
+
   public String getLocale() {
     return sharedPreferences.getString("locale", "");
   }
