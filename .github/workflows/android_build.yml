@@ -80,10 +80,23 @@ jobs:
       - name: Rename APK
         run: |
           mkdir -p release
-          APK_PATH=$(find Scrcpy/app/build/outputs/apk/debug -name "*.apk" | head -1)
+          echo "=== 查找 APK ==="
+          find Scrcpy/app/build -name "*.apk" -type f 2>&1 || true
+          APK_PATH=$(find Scrcpy/app/build -name "*.apk" -type f | head -1)
+          if [ -z "$APK_PATH" ]; then
+            echo "ERROR: 未找到 APK 文件！"
+            exit 1
+          fi
           cp "$APK_PATH" release/Scrcpy.apk
           echo "APK: $APK_PATH"
           ls -lh release/
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: scrcpy-apk
+          path: release/Scrcpy.apk
+          retention-days: 30
 
       - name: Generate Tag
         id: tag
