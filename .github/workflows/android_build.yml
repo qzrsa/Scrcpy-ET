@@ -126,6 +126,6 @@ jobs:
             ```
           draft: false
           prerelease: ${{ inputs.prerelease }}
-          files: release/Scrcpy-unsigned.apk
+          files: release/Scrcpy.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
