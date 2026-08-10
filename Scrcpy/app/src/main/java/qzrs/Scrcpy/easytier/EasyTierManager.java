@@ -334,8 +334,12 @@ public class EasyTierManager {
         BufferedReader reader;
         if (useRoot) {
           // root 模式：直接用 su -c 执行 filesDir 下的二进制
+          // 使用 ProcessBuilder 合并 stderr，方便诊断（TOML配置错误等信息会输出到 stderr）
           String cmd = getBinaryPath() + " -c " + confFile.getAbsolutePath();
-          rootProcess = Runtime.getRuntime().exec(new String[]{"su", "-c", cmd});
+          logLine("[EasyTier] su 命令: su -c " + cmd);
+          ProcessBuilder pb = new ProcessBuilder("su", "-c", cmd);
+          pb.redirectErrorStream(true);
+          rootProcess = pb.start();
           execPid = -2; // root 模式标记
           reader = new BufferedReader(new InputStreamReader(rootProcess.getInputStream(), StandardCharsets.UTF_8));
         } else {
@@ -467,10 +471,7 @@ public class EasyTierManager {
     sb.append("[flags]\n");
     sb.append("dev_name = \"tun0\"\n");
     sb.append("socks5 = [\"socks5://0.0.0.0:1080\"]\n");
-    sb.append("disable_tun = false\n");
     sb.append("enable_ipv6 = false\n");
-    sb.append("compression = \"zstd\"\n");
-    sb.append("encryption = \"aes-gcm\"\n");
     return sb.toString();
   }
 
