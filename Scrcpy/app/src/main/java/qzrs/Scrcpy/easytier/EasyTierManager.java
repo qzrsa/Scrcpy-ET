@@ -329,10 +329,21 @@ public class EasyTierManager {
         String line;
         boolean ipFound = false;
 
+        final StringBuilder lastLines = new StringBuilder();
+        int lineCount = 0;
         while ((line = reader.readLine()) != null) {
           logLine("[easytier] " + line);
+          // 保留最后20行用于诊断
+          if (lineCount < 20) {
+            lastLines.append(line).append("\n");
+            lineCount++;
+          } else {
+            int idx = lastLines.indexOf("\n");
+            if (idx >= 0) lastLines.delete(0, idx + 1);
+            lastLines.append(line).append("\n");
+          }
 
-          // 解析 VPN IP
+          // 解析 VPN IP（tun 模式）或监听成功（socks5 模式）
           if (!ipFound) {
             Matcher m = Pattern.compile("(?:tun0|tun)[^\\d]*(\\d+\\.\\d+\\.\\d+\\.\\d+)").matcher(line);
             if (m.find()) {
@@ -346,11 +357,29 @@ public class EasyTierManager {
                   Toast.LENGTH_SHORT).show();
               });
             }
+            // SOCKS5 代理模式检测：看到 listening 即认为启动成功
+            if (line.toLowerCase().contains("listening") || line.contains("socks5")) {
+              ipFound = true;
+              status = STATUS_RUNNING;
+              mainHandler.post(() -> {
+                if (listener != null) listener.onStatusChanged(status, "127.0.0.1:1080");
+                Toast.makeText(AppData.applicationContext,
+                  AppData.applicationContext.getString(R.string.easytier_started),
+                  Toast.LENGTH_SHORT).show();
+              });
+            }
           }
-
         }
 
         reader.close();
+
+        // 等待子进程结束并获取退出码
+        int exitCode = MemfdExec.waitForExit(execPid);
+        logLine("[EasyTier] 子进程退出, exitCode=" + exitCode);
+        if (exitCode != 0) {
+          logLine("[EasyTier] 最后输出:\n" + lastLines.toString());
+        }
+
         status = STATUS_STOPPED;
         currentVpnIp = "";
         mainHandler.post(() -> {

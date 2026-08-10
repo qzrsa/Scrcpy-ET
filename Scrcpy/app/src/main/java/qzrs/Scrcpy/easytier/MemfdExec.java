@@ -32,6 +32,16 @@ public final class MemfdExec {
   // 高32位=pid, 低32位=管道读端fd
   private static native long nativeExec(byte[] elf, String[] argv);
   private static native void nativeKill(int pid);
+  private static native int nativeWait(int pid); // 返回退出码
+
+  public static int waitForExit(int pid) {
+    try {
+      return nativeWait(pid);
+    } catch (Throwable t) {
+      Log.e(TAG, "waitForExit fail", t);
+      return -1;
+    }
+  }
 
   public static ExecHandle exec(byte[] elf, String[] argv) throws Exception {
     long combo = nativeExec(elf, argv);

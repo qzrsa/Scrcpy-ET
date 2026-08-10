@@ -1,6 +1,7 @@
 #include <jni.h>
 #include <unistd.h>
 #include <sys/syscall.h>
+#include <sys/wait.h>
 #include <fcntl.h>
 #include <string.h>
 #include <stdlib.h>
@@ -52,9 +53,11 @@ Java_qzrs_Scrcpy_easytier_MemfdExec_nativeExec(JNIEnv *env, jclass clazz,
 
     pid_t pid = fork();
     if (pid == 0) {
+        // 子进程：重定向 stdout/stderr 到管道
         dup2(pipefd[1], 1);
         dup2(pipefd[1], 2);
         close(pipefd[0]);
+        close(pipefd[1]);
 
         int fd = my_memfd_create("ezbin", 0);
         if (fd >= 0) {
@@ -64,14 +67,17 @@ Java_qzrs_Scrcpy_easytier_MemfdExec_nativeExec(JNIEnv *env, jclass clazz,
                 if (w <= 0) break;
                 off += (size_t) w;
             }
+            // 关键：execve 需要绝对路径 /proc/self/fd/N
             char path[64];
             snprintf(path, sizeof(path), "/proc/self/fd/%d", fd);
+            __android_log_print(ANDROID_LOG_DEBUG, TAG, "child execve: %s", path);
             execve(path, argv, environ);
+            // execve 失败才会到这里
             __android_log_print(ANDROID_LOG_ERROR, TAG, "execve failed: %s", strerror(errno));
         } else {
             __android_log_print(ANDROID_LOG_ERROR, TAG, "memfd_create failed: %s", strerror(errno));
         }
-        _exit(1);
+        _exit(127);
     }
 
     (*env)->ReleaseByteArrayElements(env, elf, buf, JNI_ABORT);
@@ -92,4 +98,20 @@ JNIEXPORT void JNICALL
 Java_qzrs_Scrcpy_easytier_MemfdExec_nativeKill(JNIEnv *env, jclass clazz, jint pid) {
     (void) env; (void) clazz;
     kill(pid, SIGKILL);
+}
+
+/*
+ * 等待子进程结束并返回退出码
+ * 返回：子进程退出码（0-255），如果进程被信号终止则返回 128+信号值
+ * 出错返回 -1
+ */
+JNIEXPORT jint JNICALL
+Java_qzrs_Scrcpy_easytier_MemfdExec_nativeWait(JNIEnv *env, jclass clazz, jint pid) {
+    (void) env; (void) clazz;
+    int status;
+    pid_t r = waitpid((pid_t) pid, &status, 0);
+    if (r < 0) return -1;
+    if (WIFEXITED(status)) return WEXITSTATUS(status);
+    if (WIFSIGNALED(status)) return 128 + WTERMSIG(status);
+    return -1;
 }
