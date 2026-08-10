@@ -110,11 +110,41 @@ public class EasyTierManager {
       if (listener != null) listener.onStatusChanged(status, currentVpnIp);
       return;
     }
+    // 先确保本地二进制存在（以供 adb push）
     File binary = new File(getBinaryPath());
-    if (binary.exists() && binary.canExecute()) {
-      startEasyTier();
+    if (!binary.exists()) {
+      extractBinaryFromAssets();
+      return; // extractBinaryFromAssets 会调用本次启动
+    }
+    // 检查是否有设备，有则走 adb push 到设备端运行
+    Device dev = pickTargetDevice();
+    if (dev != null) {
+      executor.execute(() -> {
+        try {
+          logLine("[EasyTier] 本地准备完成，二进制 " + binary.length() + " 字节");
+          logLine("[EasyTier] 目标设备: " + dev.name);
+          logLine("[EasyTier] adb push 到设备 /data/local/tmp/ ...");
+          boolean pushOk = adbPushToDeviceTmp(dev);
+          logLine("[EasyTier] adb push: " + pushOk);
+          if (pushOk) {
+            launchOnDevice(dev);
+            return;
+          }
+        } catch (Exception e) {
+          logLine("[EasyTier] adb push 异常: " + e.getMessage());
+        }
+        // 设备端启动失败，尝试本地 /data/local/tmp/
+        logLine("[EasyTier] 设备端启动失败，尝试本地启动...");
+        if (tryLocalCopyToTmp()) {
+          startEasyTier();
+        } else {
+          logLine("[EasyTier] 本地 /data/local/tmp/ 也无法启动，尝试直接执行本地文件");
+          startEasyTier();
+        }
+      });
     } else {
-      extractBundledBinary();
+      logLine("[EasyTier] 未找到设备，仅尝试本地启动");
+      startEasyTier();
     }
   }
 
@@ -137,7 +167,7 @@ public class EasyTierManager {
 
   // ==================== 内置二进制 ====================
 
-  private void extractBundledBinary() {
+  private void extractBinaryFromAssets() {
     executor.execute(() -> {
       try {
         logLine("[EasyTier] 释放内置二进制...");
@@ -154,26 +184,7 @@ public class EasyTierManager {
         chmodBinary();
         logLine("[EasyTier] 本地文件模式: " + getFileMode(binary.getAbsolutePath()));
         logLine("[EasyTier] canExecute=" + binary.canExecute());
-
-        // 尝试本地拷贝到 /data/local/tmp/
-        boolean localOk = tryLocalCopyToTmp();
-        logLine("[EasyTier] 本地 tmp 拷贝: " + localOk);
-
-        // 如果本地拷贝失败，尝试 adb push 到目标设备
-        Device dev = pickTargetDevice();
-        if (dev != null) {
-          logLine("[EasyTier] 目标设备: " + dev.name + " (" + dev.address + ")");
-          boolean pushOk = adbPushToDeviceTmp(dev);
-          logLine("[EasyTier] adb push 到设备 tmp: " + pushOk);
-          if (pushOk) {
-            // adb shell 启动 + 监听
-            launchOnDevice(dev);
-            return;
-          }
-        } else {
-          logLine("[EasyTier] 未找到可用设备，跳过 adb push");
-        }
-
+        // 提取成功后递归调用 ensureBinaryAndStart
         startEasyTier();
       } catch (Exception e) {
         logLine("[EasyTier] 内置二进制释放失败，尝试网络下载: " + e.getMessage());
@@ -309,7 +320,7 @@ public class EasyTierManager {
             Toast.LENGTH_SHORT).show();
         });
 
-        startEasyTier();
+        ensureBinaryAndStart();
       } catch (Exception e) {
         logLine("[EasyTier] 下载失败: " + e.getMessage());
         status = STATUS_ERROR;
