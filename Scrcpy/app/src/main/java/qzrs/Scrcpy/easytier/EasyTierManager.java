@@ -121,41 +121,72 @@ public class EasyTierManager {
       if (listener != null) listener.onStatusChanged(status, currentVpnIp);
       return;
     }
-    // 先确保本地二进制存在（以供 adb push）
     File binary = new File(getBinaryPath());
     if (!binary.exists()) {
       extractBinaryFromAssets();
-      return; // extractBinaryFromAssets 会调用本次启动
+      return;
     }
-    // 检查是否有设备，有则走 adb push 到设备端运行
-    Device dev = pickTargetDevice();
-    if (dev != null) {
-      executor.execute(() -> {
-        try {
-          logLine("[EasyTier] 本地准备完成，二进制 " + binary.length() + " 字节");
-          logLine("[EasyTier] 目标设备: " + dev.name);
-          logLine("[EasyTier] adb push 到设备 /data/local/tmp/ ...");
-          boolean pushOk = adbPushToDeviceTmp(dev);
-          logLine("[EasyTier] adb push: " + pushOk);
-          if (pushOk) {
-            launchOnDevice(dev);
-            return;
-          }
-        } catch (Exception e) {
-          logLine("[EasyTier] adb push 异常: " + e.getMessage());
+    executor.execute(() -> {
+      try {
+        logLine("[EasyTier] 本地二进制就绪: " + binary.length() + " 字节");
+        
+        // 方式1: 尝试 root 执行 (su -c)
+        if (tryStartWithRoot(binary)) {
+          return;
         }
-        // 设备端启动失败，尝试本地 /data/local/tmp/
-        logLine("[EasyTier] 设备端启动失败，尝试本地启动...");
+        
+        // 方式2: 尝试复制到 /data/local/tmp/ 执行
+        logLine("[EasyTier] 尝试复制到 /data/local/tmp/ ...");
         if (tryLocalCopyToTmp()) {
           startEasyTier();
-        } else {
-          logLine("[EasyTier] 本地 /data/local/tmp/ 也无法启动，尝试直接执行本地文件");
-          startEasyTier();
+          return;
         }
-      });
-    } else {
-      logLine("[EasyTier] 未找到设备，仅尝试本地启动");
-      startEasyTier();
+        
+        // 方式3: 直接执行 (会失败，但记录日志)
+        logLine("[EasyTier] 无 root 且无法写入 tmp，尝试直接执行 (预计失败)...");
+        startEasyTier();
+      } catch (Exception e) {
+        logLine("[EasyTier] 启动异常: " + e.getMessage());
+        status = STATUS_ERROR;
+        notifyStatus();
+      }
+    });
+  }
+
+  private boolean tryStartWithRoot(File binary) {
+    try {
+      logLine("[EasyTier] 检测 root 权限...");
+      Process check = Runtime.getRuntime().exec("su -c id");
+      int checkExit = check.waitFor();
+      logLine("[EasyTier] root 检测 exit=" + checkExit);
+      if (checkExit != 0) return false;
+      
+      logLine("[EasyTier] 使用 root 启动...");
+      String conf = buildConfig(
+        AppData.setting.getEasyTierSecret(),
+        AppData.setting.getEasyTierNetworkName(),
+        AppData.setting.getEasyTierPort(),
+        AppData.setting.getEasyTierUsePublic(),
+        AppData.setting.getEasyTierServer()
+      );
+      File confFile = new File(AppData.applicationContext.getFilesDir(), "easytier.conf");
+      writeFile(confFile, conf);
+      
+      ProcessBuilder pb = new ProcessBuilder();
+      pb.command("su", "-c", binary.getAbsolutePath() + " -c " + confFile.getAbsolutePath());
+      pb.redirectErrorStream(true);
+      process = pb.start();
+      status = STATUS_RUNNING;
+      notifyStatus();
+      
+      // 启动日志线程
+      executor.execute(() -> readProcessOutput(process));
+      // 启动VPN IP检测
+      executor.execute(() -> monitorVpnIp());
+      return true;
+    } catch (Exception e) {
+      logLine("[EasyTier] root 启动失败: " + e.getMessage());
+      return false;
     }
   }
 
@@ -518,6 +549,56 @@ public class EasyTierManager {
     if (listener != null) {
       mainHandler.post(() -> listener.onStatusChanged(status, currentVpnIp));
     }
+  }
+
+  private void readProcessOutput(Process proc) {
+    try {
+      BufferedReader reader = new BufferedReader(new InputStreamReader(proc.getInputStream()));
+      String line;
+      while ((line = reader.readLine()) != null) {
+        logLine("[ET] " + line);
+      }
+    } catch (Exception e) {
+      logLine("[EasyTier] 读取输出失败: " + e.getMessage());
+    }
+  }
+
+  private void monitorVpnIp() {
+    try {
+      Thread.sleep(5000); // 等5秒让VPN建立
+      for (int i = 0; i < 30; i++) { // 最多等30次
+        String ip = getVpnIpFromSystem();
+        if (ip != null && !ip.isEmpty()) {
+          currentVpnIp = ip;
+          notifyStatus();
+          logLine("[EasyTier] VPN IP: " + ip);
+          break;
+        }
+        Thread.sleep(2000);
+      }
+    } catch (Exception e) {
+      logLine("[EasyTier] VPN IP检测失败: " + e.getMessage());
+    }
+  }
+
+  private String getVpnIpFromSystem() {
+    try {
+      Process p = Runtime.getRuntime().exec("ifconfig tun0");
+      BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()));
+      String line;
+      while ((line = r.readLine()) != null) {
+        Matcher m = Pattern.compile("inet ([0-9.]+)").matcher(line);
+        if (m.find()) return m.group(1);
+      }
+      // 尝试 ip 命令
+      p = Runtime.getRuntime().exec("ip addr show tun0");
+      r = new BufferedReader(new InputStreamReader(p.getInputStream()));
+      while ((line = r.readLine()) != null) {
+        Matcher m = Pattern.compile("inet ([0-9.]+)/").matcher(line);
+        if (m.find()) return m.group(1);
+      }
+    } catch (Exception e) {}
+    return "";
   }
 
   public static String getStatusText(int status) {
