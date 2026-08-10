@@ -3,15 +3,19 @@ package qzrs.Scrcpy.easytier;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
+import android.system.Os;
+import android.system.OsConstants;
 import android.util.Log;
 import android.widget.Toast;
 
 import java.io.BufferedReader;
 import java.io.DataOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.nio.file.Files;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -34,7 +38,9 @@ public class EasyTierManager {
   private static final String DOWNLOAD_BASE = "https://github.com/qzrsa/easytier-android-build/releases/download/";
 
   private static EasyTierManager instance;
-  private Process process;
+  private int execPid = -1;
+  private FileDescriptor outReadFd;
+  private volatile boolean childRunning = false;
   private ExecutorService executor = Executors.newSingleThreadExecutor();
   private Handler mainHandler = new Handler(Looper.getMainLooper());
 
@@ -75,7 +81,7 @@ public class EasyTierManager {
   }
 
   public boolean isRunning() {
-    return status == STATUS_RUNNING && process != null && process.isAlive();
+    return status == STATUS_RUNNING && execPid > 0 && childRunning;
   }
 
   public boolean isEnabled() {
@@ -124,81 +130,20 @@ public class EasyTierManager {
     File binary = new File(getBinaryPath());
     if (!binary.exists()) {
       extractBinaryFromAssets();
-      return;
+      return; // extractBinaryFromAssets 末尾会递归调用本次启动
     }
-    executor.execute(() -> {
-      try {
-        logLine("[EasyTier] 本地二进制就绪: " + binary.length() + " 字节");
-        
-        // 方式1: 尝试 root 执行 (su -c)
-        if (tryStartWithRoot(binary)) {
-          return;
-        }
-        
-        // 方式2: 尝试复制到 /data/local/tmp/ 执行
-        logLine("[EasyTier] 尝试复制到 /data/local/tmp/ ...");
-        if (tryLocalCopyToTmp()) {
-          startEasyTier();
-          return;
-        }
-        
-        // 方式3: 直接执行 (会失败，但记录日志)
-        logLine("[EasyTier] 无 root 且无法写入 tmp，尝试直接执行 (预计失败)...");
-        startEasyTier();
-      } catch (Exception e) {
-        logLine("[EasyTier] 启动异常: " + e.getMessage());
-        status = STATUS_ERROR;
-        notifyStatus();
-      }
-    });
-  }
-
-  private boolean tryStartWithRoot(File binary) {
-    try {
-      logLine("[EasyTier] 检测 root 权限...");
-      Process check = Runtime.getRuntime().exec("su -c id");
-      int checkExit = check.waitFor();
-      logLine("[EasyTier] root 检测 exit=" + checkExit);
-      if (checkExit != 0) return false;
-      
-      logLine("[EasyTier] 使用 root 启动...");
-      String conf = buildConfig(
-        AppData.setting.getEasyTierSecret(),
-        AppData.setting.getEasyTierNetworkName(),
-        AppData.setting.getEasyTierPort(),
-        AppData.setting.getEasyTierUsePublic(),
-        AppData.setting.getEasyTierServer()
-      );
-      File confFile = new File(AppData.applicationContext.getFilesDir(), "easytier.conf");
-      writeFile(confFile, conf);
-      
-      ProcessBuilder pb = new ProcessBuilder();
-      pb.command("su", "-c", binary.getAbsolutePath() + " -c " + confFile.getAbsolutePath());
-      pb.redirectErrorStream(true);
-      process = pb.start();
-      status = STATUS_RUNNING;
-      notifyStatus();
-      
-      // 启动日志线程
-      executor.execute(() -> readProcessOutput(process));
-      // 启动VPN IP检测
-      executor.execute(() -> monitorVpnIp());
-      return true;
-    } catch (Exception e) {
-      logLine("[EasyTier] root 启动失败: " + e.getMessage());
-      return false;
-    }
+    startEasyTier();
   }
 
   public void stop() {
     executor.execute(() -> {
       try {
-        if (process != null) {
-          process.destroy();
-          process.waitFor();
+        if (execPid > 0) {
+          Os.kill(execPid, OsConstants.SIGKILL);
         }
       } catch (Exception ignored) {}
-      process = null;
+      execPid = -1;
+      childRunning = false;
       status = STATUS_STOPPED;
       currentVpnIp = "";
       mainHandler.post(() -> {
@@ -231,91 +176,6 @@ public class EasyTierManager {
       } catch (Exception e) {
         logLine("[EasyTier] 内置二进制释放失败，尝试网络下载: " + e.getMessage());
         downloadBinary();
-      }
-    });
-  }
-
-  private boolean tryLocalCopyToTmp() {
-    try {
-      Process test = Runtime.getRuntime().exec(new String[] { "sh", "-c", "ls -ld /data/local/tmp/ ; id ; whoami" });
-      BufferedReader tr = new BufferedReader(new InputStreamReader(test.getInputStream()));
-      StringBuilder sb = new StringBuilder();
-      String l;
-      while ((l = tr.readLine()) != null) sb.append(l).append("|");
-      tr.close();
-      test.waitFor();
-      logLine("[EasyTier] tmp env: " + sb);
-      Process p = Runtime.getRuntime().exec(new String[] { "sh", "-c",
-        "cat \"" + getBinaryPath() + "\" > \"" + getAltBinaryPath() + "\" && chmod 755 \"" + getAltBinaryPath() + "\"" });
-      int exit = p.waitFor();
-      return exit == 0 && new File(getAltBinaryPath()).canExecute();
-    } catch (Exception e) {
-      return false;
-    }
-  }
-
-  private boolean adbPushToDeviceTmp(Device dev) {
-    try {
-      final boolean[] done = { false };
-      final boolean[] ok = { false };
-      InputStream is = AppData.applicationContext.getAssets().open(BINARY_NAME);
-      AdbTools.pushToLocalTmp(dev, is, BINARY_NAME, code -> {
-        ok[0] = code == 0;
-        done[0] = true;
-      });
-      long deadline = System.currentTimeMillis() + 60000;
-      while (!done[0] && System.currentTimeMillis() < deadline) Thread.sleep(200);
-      is.close();
-      return ok[0];
-    } catch (Exception e) {
-      logLine("[EasyTier] adb push 异常: " + e.getMessage());
-      return false;
-    }
-  }
-
-  private void launchOnDevice(Device dev) {
-    // 通过 adb shell chmod + 后台启动 easytier-core，读 ifconfig tun0 拿 VPN IP
-    executor.execute(() -> {
-      try {
-        String remoteTmp = "/data/local/tmp/" + BINARY_NAME;
-        String remoteConf = "/data/local/tmp/easytier.conf";
-
-        // 写配置文件到本地，adb push 上去
-        String secret = AppData.setting.getEasyTierSecret();
-        String networkName = AppData.setting.getEasyTierNetworkName();
-        int port = AppData.setting.getEasyTierPort();
-        boolean usePublic = AppData.setting.getEasyTierUsePublic();
-        String server = AppData.setting.getEasyTierServer();
-        String conf = buildConfig(secret, networkName, port, usePublic, server);
-
-        // 先本地写好
-        File confFile = new File(AppData.applicationContext.getFilesDir(), "easytier.conf");
-        writeFile(confFile, conf);
-        // push config
-        final boolean[] confDone = { false };
-        AdbTools.pushToLocalTmp(dev, new java.io.ByteArrayInputStream(conf.getBytes(StandardCharsets.UTF_8)), "easytier.conf", code -> confDone[0] = (code == 0));
-        long deadline = System.currentTimeMillis() + 30000;
-        while (!confDone[0] && System.currentTimeMillis() < deadline) Thread.sleep(200);
-
-        // chmod + 启动
-        AdbTools.runOnceCmd(dev, "chmod 755 " + remoteTmp + " && nohup " + remoteTmp + " -c " + remoteConf + " > /data/local/tmp/easytier.log 2>&1 &", success -> {
-          logLine("[EasyTier] 远程启动: " + (success ? "ok" : "fail"));
-        });
-
-        // 等几秒拿 VPN IP
-        Thread.sleep(8000);
-        AdbTools.runOnceCmd(dev, "ifconfig tun0 2>/dev/null | grep -oE 'inet [0-9.]+' | head -1", success -> {});
-        // 这里 ifconfig 输出需要另一条指令拿到，简化直接 cat /proc/net/dev 或 ifconfig 全文
-        AdbTools.runOnceCmd(dev, "ip addr show tun0 2>/dev/null || ifconfig tun0 2>/dev/null", success -> {});
-
-        status = STATUS_RUNNING;
-        mainHandler.post(() -> {
-          if (listener != null) listener.onStatusChanged(status, "(设备端运行)");
-        });
-      } catch (Exception e) {
-        logLine("[EasyTier] 远程启动失败: " + e.getMessage());
-        status = STATUS_ERROR;
-        notifyStatus();
       }
     });
   }
@@ -450,18 +310,29 @@ public class EasyTierManager {
         String conf = buildConfig(secret, networkName, port, usePublic, server);
         writeFile(confFile, conf);
 
-        logLine("[EasyTier] 正在启动...");
-        ProcessBuilder pb = new ProcessBuilder();
-        // 优先用 /data/local/tmp/ 路径（避开 filesDir noexec）
-        File altBin = new File(getAltBinaryPath());
-        String execPath = (altBin.exists() && altBin.canExecute()) ? altBin.getAbsolutePath() : getBinaryPath();
-        logLine("[EasyTier] 使用二进制路径: " + execPath);
-        pb.command(execPath, "-c", confFile.getAbsolutePath());
-        pb.redirectErrorStream(true);
-        process = pb.start();
+        // 读二进制到内存（memfd 执行用）
+        byte[] elf = Files.readAllBytes(binaryFile.toPath());
+        logLine("[EasyTier] 已读入内存: " + elf.length + " 字节");
 
-        // 读取输出行
-        BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
+        String[] argv = new String[] {
+          "easytier-core",
+          "-c", confFile.getAbsolutePath()
+        };
+
+        logLine("[EasyTier] 通过 memfd 启动（无 root / 绕过 noexec）...");
+        MemfdExec.ExecHandle h = MemfdExec.exec(elf, argv);
+        execPid = h.pid;
+        outReadFd = h.out;
+        childRunning = true;
+        status = STATUS_RUNNING;
+        mainHandler.post(() -> {
+          if (listener != null) listener.onStatusChanged(status, currentVpnIp);
+        });
+        logLine("[EasyTier] 子进程 pid=" + execPid);
+
+        // 读子进程输出
+        FileInputStream fis = new FileInputStream(outReadFd);
+        BufferedReader reader = new BufferedReader(new InputStreamReader(fis, StandardCharsets.UTF_8));
         String line;
         boolean ipFound = false;
 
@@ -484,11 +355,6 @@ public class EasyTierManager {
             }
           }
 
-          // 检测进程退出
-          if (!isProcessAlive()) {
-            logLine("[EasyTier] 进程已退出");
-            break;
-          }
         }
 
         reader.close();
@@ -505,20 +371,13 @@ public class EasyTierManager {
     });
   }
 
-  private boolean isProcessAlive() {
-    try {
-      process.exitValue();
-      return false;
-    } catch (IllegalThreadStateException e) {
-      return true;
-    }
-  }
-
   private String buildConfig(String secret, String networkName, int port, boolean usePublic, String server) {
     StringBuilder sb = new StringBuilder();
     sb.append("instance_secret = \"").append(secret).append("\"\n");
     sb.append("protocol_name = \"").append(networkName).append("\"\n");
     sb.append("listen_port = ").append(port).append("\n");
+    // 代理模式：提供本地 SOCKS5，无需 root/无需创建 tun 设备
+    sb.append("socks5 = [\"127.0.0.1:1080\"]\n");
     if (usePublic) {
       if (server != null && !server.trim().isEmpty()) {
         sb.append("server = [\"").append(server.trim()).append("\"]\n");
