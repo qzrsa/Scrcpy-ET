@@ -6,12 +6,12 @@ on:
       app_version_name:
         description: 'Version Name'
         required: true
-        default: '2.0.X'
+        default: '2.1.0-ET'
         type: string
       app_version_code:
         description: 'Version Code (0 = auto-increment)'
         required: false
-        default: '10000'
+        default: '0'
         type: string
       note:
         description: 'Update Note'
@@ -46,28 +46,18 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
-      - name: Decode Keystore and Setup Properties
-        run: |
-          echo "MY_KEYSTORE_FILE=upload_keystore.jks" > keystore.properties
-          echo "MY_KEY_ALIAS=${{ secrets.KEY_ALIAS }}" >> keystore.properties
-          echo "MY_KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}" >> keystore.properties
-          echo "MY_KEYSTORE_PASSWORD=${{ secrets.STORE_PASSWORD }}" >> keystore.properties
-
-          mkdir -p Scrcpy/app
-          echo "${{ secrets.SIGNING_KEY }}" | base64 -d > Scrcpy/app/upload_keystore.jks
-
       - name: Update Android Version
         id: version
         run: |
           INPUT_CODE="${{ inputs.app_version_code }}"
           if [ "$INPUT_CODE" = "0" ] || [ -z "$INPUT_CODE" ]; then
-            CURRENT_CODE=$(grep -oP 'versionCode\\s+\\K\\d+' Scrcpy/app/build.gradle | head -1)
+            CURRENT_CODE=$(grep -oP 'versionCode\s+\K\d+' Scrcpy/app/build.gradle | head -1)
             NEW_CODE=$((CURRENT_CODE + 1))
           else
             NEW_CODE="$INPUT_CODE"
           fi
 
-          sed -i "s/versionCode [0-9]\\+/versionCode ${NEW_CODE}/" Scrcpy/app/build.gradle
+          sed -i "s/versionCode [0-9]\+/versionCode ${NEW_CODE}/" Scrcpy/app/build.gradle
           sed -i 's/versionName ".*"/versionName "${{ inputs.app_version_name }}"/' Scrcpy/app/build.gradle
 
           echo "new_version_code=${NEW_CODE}" >> $GITHUB_OUTPUT
@@ -82,17 +72,18 @@ jobs:
           cd Scrcpy
           ./gradlew :server:copyRelease --no-daemon
 
-      - name: Build App
+      - name: Build App (debug build, no signing required)
         run: |
           cd Scrcpy
-          ./gradlew :app:assembleRelease --no-daemon
+          ./gradlew :app:assembleDebug --no-daemon
 
       - name: Rename APK
         run: |
           mkdir -p release
-          APK_PATH=$(find Scrcpy/app/build/outputs/apk/release -name "*.apk" | head -1)
+          APK_PATH=$(find Scrcpy/app/build/outputs/apk/debug -name "*.apk" | head -1)
           cp "$APK_PATH" release/Scrcpy.apk
-          ls -l release
+          echo "APK: $APK_PATH"
+          ls -lh release/
 
       - name: Generate Tag
         id: tag
@@ -106,12 +97,22 @@ jobs:
           tag_name: ${{ steps.tag.outputs.release_tag }}
           name: Scrcpy Release ${{ steps.tag.outputs.release_tag }}
           body: |
-            Version Name: ${{ inputs.app_version_name }}
-            Version Code: ${{ steps.version.outputs.new_version_code }}
-            Build Date: ${{ steps.tag.outputs.release_date }}
-            Note: ${{ inputs.note }}
+            ## 📱 Scrcpy EasyTier Edition
+
+            **Version Name:** ${{ inputs.app_version_name }}
+            **Version Code:** ${{ steps.version.outputs.new_version_code }}
+            **Build Date:** ${{ steps.tag.outputs.release_date }}
+
+            ${{ inputs.note }}
+
+            ---
+            ⚠️ **注意：** 此 APK 未签名，仅用于测试。
+            如需正式安装，请使用 Android Studio 或 `apksigner` 进行签名：
+            ```
+            apksigner sign --ks your-keystore.jks --out Scrcpy-signed.apk Scrcpy-unsigned.apk
+            ```
           draft: false
           prerelease: ${{ inputs.prerelease }}
-          files: release/Scrcpy.apk
+          files: release/Scrcpy-unsigned.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
