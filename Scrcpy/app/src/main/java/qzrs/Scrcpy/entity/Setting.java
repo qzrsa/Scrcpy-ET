@@ -64,6 +64,25 @@ public final class Setting {
     editor.apply();
   }
 
+  // 虚拟 IPv4 配置：DHCP 模式（默认）或手动指定
+  public boolean getEasyTierDhcpEnabled() {
+    return sharedPreferences.getBoolean("easytier_dhcp_enabled", true);
+  }
+
+  public void setEasyTierDhcpEnabled(boolean value) {
+    editor.putBoolean("easytier_dhcp_enabled", value);
+    editor.apply();
+  }
+
+  public String getEasyTierVirtualIp() {
+    return sharedPreferences.getString("easytier_virtual_ip", "");
+  }
+
+  public void setEasyTierVirtualIp(String value) {
+    editor.putString("easytier_virtual_ip", value);
+    editor.apply();
+  }
+
   public String getLocale() {
     return sharedPreferences.getString("locale", "");
   }

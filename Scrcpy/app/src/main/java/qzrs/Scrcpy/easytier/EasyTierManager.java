@@ -304,10 +304,12 @@ public class EasyTierManager {
         int port = AppData.setting.getEasyTierPort();
         boolean usePublic = AppData.setting.getEasyTierUsePublic();
         String server = AppData.setting.getEasyTierServer();
+        boolean dhcpEnabled = AppData.setting.getEasyTierDhcpEnabled();
+        String virtualIp = AppData.setting.getEasyTierVirtualIp();
 
         // 生成配置
         File confFile = getConfigFile();
-        String conf = buildConfig(secret, networkName, port, usePublic, server);
+        String conf = buildConfig(secret, networkName, port, usePublic, server, dhcpEnabled, virtualIp);
         writeFile(confFile, conf);
 
         // 读二进制到内存（memfd 执行用）
@@ -427,12 +429,23 @@ public class EasyTierManager {
   }
 
   private String buildConfig(String secret, String networkName, int port, boolean usePublic, String server) {
+    return buildConfig(secret, networkName, port, usePublic, server, true, "");
+  }
+
+  private String buildConfig(String secret, String networkName, int port, boolean usePublic, String server,
+                             boolean dhcpEnabled, String virtualIp) {
     StringBuilder sb = new StringBuilder();
     sb.append("instance_secret = \"").append(secret).append("\"\n");
     sb.append("protocol_name = \"").append(networkName).append("\"\n");
     sb.append("listen_port = ").append(port).append("\n");
     // 代理模式：提供本地 SOCKS5，无需 root/无需创建 tun 设备
     sb.append("socks5 = [\"127.0.0.1:1080\"]\n");
+
+    // 虚拟 IPv4 配置：DHCP 或手动指定
+    if (!dhcpEnabled && virtualIp != null && !virtualIp.trim().isEmpty()) {
+      sb.append("ipv4 = \"").append(virtualIp.trim()).append("\"\n");
+    }
+
     if (usePublic) {
       if (server != null && !server.trim().isEmpty()) {
         sb.append("server = [\"").append(server.trim()).append("\"]\n");

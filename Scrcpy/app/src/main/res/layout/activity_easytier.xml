@@ -186,6 +186,63 @@
           android:textColorHint="@color/onCardBackgroundSecond"
           android:textSize="@dimen/smallFont" />
 
+        <!-- 虚拟 IPv4 配置 -->
+        <LinearLayout
+          android:layout_width="match_parent"
+          android:layout_height="wrap_content"
+          android:layout_marginTop="10dp"
+          android:gravity="center"
+          android:orientation="horizontal">
+
+          <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/easytier_dhcp"
+            android:textColor="@color/onCardBackground"
+            android:textSize="@dimen/middleFont" />
+
+          <Switch
+            android:id="@+id/switch_dhcp"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:thumbTint="@color/button"
+            android:trackTint="@color/button" />
+        </LinearLayout>
+
+        <TextView
+          android:layout_width="wrap_content"
+          android:layout_height="wrap_content"
+          android:layout_marginTop="4dp"
+          android:text="@string/easytier_dhcp_detail"
+          android:textColor="@color/onCardBackgroundSecond"
+          android:textSize="@dimen/smallSmallFont" />
+
+        <!-- 自定义虚拟 IP（DHCP 关闭时显示） -->
+        <LinearLayout
+          android:id="@+id/virtual_ip_area"
+          android:layout_width="match_parent"
+          android:layout_height="wrap_content"
+          android:layout_marginTop="10dp"
+          android:orientation="vertical">
+
+          <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/easytier_virtual_ip"
+            android:textColor="@color/onCardBackground"
+            android:textSize="@dimen/middleFont" />
+
+          <EditText
+            android:id="@+id/edit_virtual_ip"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/easytier_virtual_ip_hint"
+            android:textColor="@color/onCardBackground"
+            android:textColorHint="@color/onCardBackgroundSecond"
+            android:textSize="@dimen/smallFont" />
+        </LinearLayout>
+
         <!-- 保存按钮 -->
         <Button
           android:id="@+id/btn_save"

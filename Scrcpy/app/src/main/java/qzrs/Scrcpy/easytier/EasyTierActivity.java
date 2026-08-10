@@ -48,12 +48,26 @@ public class EasyTierActivity extends Activity implements EasyTierManager.Status
     binding.editPort.setText(String.valueOf(AppData.setting.getEasyTierPort()));
     binding.editServer.setText(AppData.setting.getEasyTierServer());
     binding.switchPublic.setChecked(AppData.setting.getEasyTierUsePublic());
+    binding.switchDhcp.setChecked(AppData.setting.getEasyTierDhcpEnabled());
+    binding.editVirtualIp.setText(AppData.setting.getEasyTierVirtualIp());
 
     updateConfigArea();
+    updateVirtualIpArea();
+
     binding.switchEnable.setOnCheckedChangeListener((v, checked) -> {
       AppData.setting.setEasyTierEnabled(checked);
       updateConfigArea();
     });
+
+    binding.switchDhcp.setOnCheckedChangeListener((v, checked) -> {
+      AppData.setting.setEasyTierDhcpEnabled(checked);
+      updateVirtualIpArea();
+    });
+  }
+
+  private void updateVirtualIpArea() {
+    boolean dhcp = binding.switchDhcp.isChecked();
+    binding.virtualIpArea.setVisibility(dhcp ? View.GONE : View.VISIBLE);
   }
 
   private void updateConfigArea() {
@@ -70,6 +84,7 @@ public class EasyTierActivity extends Activity implements EasyTierManager.Status
       String networkName = binding.editNetworkName.getText().toString().trim();
       String portStr = binding.editPort.getText().toString().trim();
       String server = binding.editServer.getText().toString().trim();
+      String virtualIp = binding.editVirtualIp.getText().toString().trim();
       int port = 11010;
       try { port = Integer.parseInt(portStr); } catch (Exception ignored) {}
 
@@ -78,6 +93,8 @@ public class EasyTierActivity extends Activity implements EasyTierManager.Status
       AppData.setting.setEasyTierPort(port);
       AppData.setting.setEasyTierServer(server);
       AppData.setting.setEasyTierUsePublic(binding.switchPublic.isChecked());
+      AppData.setting.setEasyTierDhcpEnabled(binding.switchDhcp.isChecked());
+      AppData.setting.setEasyTierVirtualIp(virtualIp);
 
       Toast.makeText(this, getString(R.string.toast_success), Toast.LENGTH_SHORT).show();
     });

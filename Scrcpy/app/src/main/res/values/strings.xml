@@ -140,4 +140,10 @@
   <string name="easytier_stopped">EasyTier 已停止</string>
   <string name="easytier_copy_ip">VPN IP 已复制</string>
   <string name="easytier_need_permission">需要先在设置中填写连接密码</string>
+
+  <!-- EasyTier 虚拟 IPv4 配置 -->
+  <string name="easytier_dhcp">DHCP 自动分配</string>
+  <string name="easytier_dhcp_detail">开启：自动分配虚拟 IP；关闭：手动指定虚拟 IPv4 地址</string>
+  <string name="easytier_virtual_ip">虚拟 IPv4 地址</string>
+  <string name="easytier_virtual_ip_hint">例如 10.126.126.1</string>
 </resources>
