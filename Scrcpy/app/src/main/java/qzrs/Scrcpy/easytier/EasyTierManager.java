@@ -375,7 +375,8 @@ public class EasyTierManager {
 
           // 解析 tun 虚拟 IP（优先：这是本机真实获得的网卡地址）
           // 匹配包含 tun0/tun/easytier0+IP，或 "ip" 关键字+IP（v2.6.4可能输出格式不同）
-          Matcher m = Pattern.compile("(?:(?:tun0|tun|easytier0)[^\\d]*|virtual[_-]?ip[^\\d]*|ip[^\\d]*)(\\d+\\.\\d+\\.\\d+\\.\\d+)").matcher(line);
+          // 排除 0.0.0.0 占位（未分配时的默认输出）
+          Matcher m = Pattern.compile("(?:(?:tun0|tun|easytier0)[^\\d]*|virtual[_-]?ip[^\\d]*|ip[^\\d]*)([1-9]\\d*\\.\\d+\\.\\d+\\.\\d+)").matcher(line);
           if (m.find()) {
             currentVpnIp = m.group(1);
             if (!ipFound) {
