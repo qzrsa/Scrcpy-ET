@@ -83,12 +83,23 @@ public class EasyTierManager {
   }
 
   private Device pickTargetDevice() {
+    // 优先从已连接设备列表选
     ArrayList<Device> list = AdbTools.devicesList;
-    if (list == null || list.isEmpty()) return null;
-    for (Device d : list) {
-      if (!d.isLinkDevice()) return d;
+    if (list != null && !list.isEmpty()) {
+      for (Device d : list) {
+        if (!d.isLinkDevice()) return d;
+      }
+      return list.get(0);
     }
-    return list.get(0);
+    // 已连接列表为空，从数据库读取配置的设备
+    ArrayList<Device> dbList = AppData.dbHelper.getAll();
+    if (dbList != null && !dbList.isEmpty()) {
+      for (Device d : dbList) {
+        if (!d.isLinkDevice()) return d;
+      }
+      return dbList.get(0);
+    }
+    return null;
   }
 
   public String getBinaryPath() {
