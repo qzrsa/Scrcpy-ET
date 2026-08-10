@@ -369,11 +369,11 @@ public class EasyTierManager {
             lastLines.append(line).append("\n");
           }
 
-          // 解析 VPN IP（tun 模式）或监听成功（socks5 模式）
-          if (!ipFound) {
-            Matcher m = Pattern.compile("(?:tun0|tun)[^\\d]*(\\d+\\.\\d+\\.\\d+\\.\\d+)").matcher(line);
-            if (m.find()) {
-              currentVpnIp = m.group(1);
+          // 解析 tun 虚拟 IP（优先：这是本机真实获得的网卡地址）
+          Matcher m = Pattern.compile("(?:tun0|tun|easytier0)[^\\d]*(\\d+\\.\\d+\\.\\d+\\.\\d+)").matcher(line);
+          if (m.find()) {
+            currentVpnIp = m.group(1);
+            if (!ipFound) {
               ipFound = true;
               status = STATUS_RUNNING;
               mainHandler.post(() -> {
@@ -382,18 +382,24 @@ public class EasyTierManager {
                   AppData.applicationContext.getString(R.string.easytier_started),
                   Toast.LENGTH_SHORT).show();
               });
-            }
-            // SOCKS5 代理模式检测：看到 listening 即认为启动成功
-            if (line.toLowerCase().contains("listening") || line.contains("socks5")) {
-              ipFound = true;
-              status = STATUS_RUNNING;
+            } else {
+              // 已启动，仅更新显示为本机真实虚拟 IP
               mainHandler.post(() -> {
-                if (listener != null) listener.onStatusChanged(status, "127.0.0.1:1080");
-                Toast.makeText(AppData.applicationContext,
-                  AppData.applicationContext.getString(R.string.easytier_started),
-                  Toast.LENGTH_SHORT).show();
+                if (listener != null) listener.onStatusChanged(status, currentVpnIp);
               });
             }
+          }
+          // SOCKS5 代理监听检测：仅作为启动成功标志，不锁定 IP（让 tun 后续覆盖）
+          if (!ipFound && (line.toLowerCase().contains("listening") || line.toLowerCase().contains("socks5"))) {
+            ipFound = true;
+            status = STATUS_RUNNING;
+            currentVpnIp = "127.0.0.1:1080";
+            mainHandler.post(() -> {
+              if (listener != null) listener.onStatusChanged(status, currentVpnIp);
+              Toast.makeText(AppData.applicationContext,
+                AppData.applicationContext.getString(R.string.easytier_started),
+                Toast.LENGTH_SHORT).show();
+            });
           }
         }
 
