@@ -37,6 +37,7 @@ public class EasyTierManager {
 
   private static EasyTierManager instance;
   private int execPid = -1;
+  private Process rootProcess = null; // root 模式用的 Process
   private volatile boolean childRunning = false;
   private ExecutorService executor = Executors.newSingleThreadExecutor();
   private Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -134,7 +135,11 @@ public class EasyTierManager {
 
   public void stop() {
     executor.execute(() -> {
-      if (execPid > 0) {
+      if (rootProcess != null) {
+        rootProcess.destroy();
+        try { rootProcess.waitFor(); } catch (Exception ignored) {}
+        rootProcess = null;
+      } else if (execPid > 0) {
         MemfdExec.kill(execPid);
       }
       execPid = -1;
@@ -314,18 +319,37 @@ public class EasyTierManager {
           "-c", confFile.getAbsolutePath()
         };
 
-        logLine("[EasyTier] 通过 memfd 启动（无 root / 绕过 noexec）...");
-        MemfdExec.ExecHandle h = MemfdExec.exec(elf, argv);
-        execPid = h.pid;
+        // 策略1: 优先尝试 root 执行（最可靠）
+        boolean useRoot = false;
+        try {
+          Process checkSu = Runtime.getRuntime().exec(new String[]{"su", "-c", "id"});
+          if (checkSu.waitFor() == 0) {
+            useRoot = true;
+            logLine("[EasyTier] 检测到 root，使用 su 执行");
+          }
+        } catch (Exception ignored) {}
+
+        BufferedReader reader;
+        if (useRoot) {
+          // root 模式：直接用 su -c 执行 filesDir 下的二进制
+          String cmd = getBinaryPath() + " -c " + confFile.getAbsolutePath();
+          rootProcess = Runtime.getRuntime().exec(new String[]{"su", "-c", cmd});
+          execPid = -2; // root 模式标记
+          reader = new BufferedReader(new InputStreamReader(rootProcess.getInputStream(), StandardCharsets.UTF_8));
+        } else {
+          // 策略2: memfd 执行（免 root，但部分设备不支持 /proc/self/fd/N 执行）
+          logLine("[EasyTier] 尝试 memfd 启动（免 root）...");
+          MemfdExec.ExecHandle h = MemfdExec.exec(elf, argv);
+          execPid = h.pid;
+          reader = new BufferedReader(new InputStreamReader(h.out, StandardCharsets.UTF_8));
+        }
+
         childRunning = true;
         status = STATUS_RUNNING;
         mainHandler.post(() -> {
           if (listener != null) listener.onStatusChanged(status, currentVpnIp);
         });
         logLine("[EasyTier] 子进程 pid=" + execPid);
-
-        // 读子进程输出
-        BufferedReader reader = new BufferedReader(new InputStreamReader(h.out, StandardCharsets.UTF_8));
         String line;
         boolean ipFound = false;
 
@@ -374,10 +398,19 @@ public class EasyTierManager {
         reader.close();
 
         // 等待子进程结束并获取退出码
-        int exitCode = MemfdExec.waitForExit(execPid);
+        int exitCode;
+        if (useRoot && rootProcess != null) {
+          exitCode = rootProcess.waitFor();
+        } else {
+          exitCode = MemfdExec.waitForExit(execPid);
+        }
         logLine("[EasyTier] 子进程退出, exitCode=" + exitCode);
         if (exitCode != 0) {
           logLine("[EasyTier] 最后输出:\n" + lastLines.toString());
+          if (exitCode == 127 && !useRoot) {
+            logLine("[EasyTier] 提示: memfd 执行失败 (127)，设备可能禁止 /proc/self/fd 执行");
+            logLine("[EasyTier] 建议: 授予 root 权限，或安装 Termux 手动运行 easytier");
+          }
         }
 
         status = STATUS_STOPPED;
