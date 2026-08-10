@@ -82,6 +82,10 @@ public class EasyTierManager {
     return new File(AppData.applicationContext.getFilesDir(), BINARY_NAME).getAbsolutePath();
   }
 
+  private String getAltBinaryPath() {
+    return "/data/local/tmp/" + BINARY_NAME;
+  }
+
   private File getConfigFile() {
     return new File(AppData.applicationContext.getFilesDir(), "easytier.conf");
   }
@@ -94,7 +98,7 @@ public class EasyTierManager {
       return;
     }
     File binary = new File(getBinaryPath());
-    if (binary.exists()) {
+    if (binary.exists() && binary.canExecute()) {
       startEasyTier();
     } else {
       extractBundledBinary();
@@ -135,13 +139,44 @@ public class EasyTierManager {
         out.close();
         in.close();
         chmodBinary();
-        logLine("[EasyTier] 内置二进制释放完成");
+        logLine("[EasyTier] 本地文件模式: " + getFileMode(binary.getAbsolutePath()));
+        logLine("[EasyTier] canExecute=" + binary.canExecute());
+
+        // 尝试复制到 /data/local/tmp/（避开 noexec 限制）
+        boolean altOk = copyToLocalTmp();
+        logLine("[EasyTier] alt binary ready: " + altOk);
         startEasyTier();
       } catch (Exception e) {
         logLine("[EasyTier] 内置二进制释放失败，尝试网络下载: " + e.getMessage());
         downloadBinary();
       }
     });
+  }
+
+  private boolean copyToLocalTmp() {
+    try {
+      Process p = Runtime.getRuntime().exec(new String[] { "sh", "-c",
+        "cp '" + getBinaryPath() + "' '" + getAltBinaryPath() + "' && chmod 755 '" + getAltBinaryPath() + "'" });
+      int exit = p.waitFor();
+      logLine("[EasyTier] copy to tmp exit=" + exit + ", mode=" + getFileMode(getAltBinaryPath()));
+      return exit == 0;
+    } catch (Exception e) {
+      logLine("[EasyTier] copy to tmp failed: " + e.getMessage());
+      return false;
+    }
+  }
+
+  private String getFileMode(String path) {
+    try {
+      Process p = Runtime.getRuntime().exec(new String[] { "sh", "-c", "ls -l '" + path + "'" });
+      BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()));
+      String line = r.readLine();
+      r.close();
+      p.waitFor();
+      return line != null ? line : "(null)";
+    } catch (Exception e) {
+      return "(err: " + e.getMessage() + ")";
+    }
   }
 
   // ==================== 下载二进制 ====================
@@ -245,6 +280,11 @@ public class EasyTierManager {
 
     executor.execute(() -> {
       try {
+        File binaryFile = new File(getBinaryPath());
+        logLine("[EasyTier] 二进制路径: " + binaryFile.getAbsolutePath());
+        logLine("[EasyTier] 二进制存在: " + binaryFile.exists() + ", 大小: " + (binaryFile.exists() ? binaryFile.length() : -1));
+        logLine("[EasyTier] 可执行: " + binaryFile.canExecute());
+
         String secret = AppData.setting.getEasyTierSecret();
         String networkName = AppData.setting.getEasyTierNetworkName();
         int port = AppData.setting.getEasyTierPort();
@@ -258,7 +298,11 @@ public class EasyTierManager {
 
         logLine("[EasyTier] 正在启动...");
         ProcessBuilder pb = new ProcessBuilder();
-        pb.command(getBinaryPath(), "-c", confFile.getAbsolutePath());
+        // 优先用 /data/local/tmp/ 路径（避开 filesDir noexec）
+        File altBin = new File(getAltBinaryPath());
+        String execPath = (altBin.exists() && altBin.canExecute()) ? altBin.getAbsolutePath() : getBinaryPath();
+        logLine("[EasyTier] 使用二进制路径: " + execPath);
+        pb.command(execPath, "-c", confFile.getAbsolutePath());
         pb.redirectErrorStream(true);
         process = pb.start();
 
