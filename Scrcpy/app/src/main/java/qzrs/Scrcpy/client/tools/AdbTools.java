@@ -87,4 +87,20 @@ public class AdbTools {
       }
     }).start();
   }
+
+  public static void pushToLocalTmp(Device device, InputStream file, String fileName, MyInterface.MyFunctionInt handleProcess) {
+    new Thread(() -> {
+      try {
+        String tempFileName = fileName;
+        Adb adb = connectADB(device);
+        if (!Pattern.compile("^[a-zA-Z0-9\\(\\)\\-\\_\\[\\]\\.]+$").matcher(tempFileName).matches()) {
+          int dotIndex = tempFileName.lastIndexOf(".");
+          tempFileName = UUID.randomUUID() + (dotIndex == -1 ? "" : tempFileName.substring(dotIndex));
+        }
+        adb.pushFile(file, "/data/local/tmp/" + tempFileName, handleProcess);
+      } catch (Exception ignored) {
+        handleProcess.run(-1);
+      }
+    }).start();
+  }
 }

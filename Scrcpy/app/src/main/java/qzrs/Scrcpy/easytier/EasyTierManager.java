@@ -15,13 +15,17 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import qzrs.Scrcpy.R;
+import qzrs.Scrcpy.client.tools.AdbTools;
 import qzrs.Scrcpy.entity.AppData;
+import qzrs.Scrcpy.entity.Device;
+import qzrs.Scrcpy.entity.MyInterface;
 
 public class EasyTierManager {
   private static final String TAG = "EasyTierManager";
@@ -76,6 +80,15 @@ public class EasyTierManager {
 
   public boolean isEnabled() {
     return AppData.setting.getEasyTierEnabled();
+  }
+
+  private Device pickTargetDevice() {
+    ArrayList<Device> list = AdbTools.devicesList;
+    if (list == null || list.isEmpty()) return null;
+    for (Device d : list) {
+      if (!d.isLinkDevice()) return d;
+    }
+    return list.get(0);
   }
 
   public String getBinaryPath() {
@@ -142,9 +155,25 @@ public class EasyTierManager {
         logLine("[EasyTier] 本地文件模式: " + getFileMode(binary.getAbsolutePath()));
         logLine("[EasyTier] canExecute=" + binary.canExecute());
 
-        // 尝试复制到 /data/local/tmp/（避开 noexec 限制）
-        boolean altOk = copyToLocalTmp();
-        logLine("[EasyTier] alt binary ready: " + altOk);
+        // 尝试本地拷贝到 /data/local/tmp/
+        boolean localOk = tryLocalCopyToTmp();
+        logLine("[EasyTier] 本地 tmp 拷贝: " + localOk);
+
+        // 如果本地拷贝失败，尝试 adb push 到目标设备
+        Device dev = pickTargetDevice();
+        if (dev != null) {
+          logLine("[EasyTier] 目标设备: " + dev.name + " (" + dev.address + ")");
+          boolean pushOk = adbPushToDeviceTmp(dev);
+          logLine("[EasyTier] adb push 到设备 tmp: " + pushOk);
+          if (pushOk) {
+            // adb shell 启动 + 监听
+            launchOnDevice(dev);
+            return;
+          }
+        } else {
+          logLine("[EasyTier] 未找到可用设备，跳过 adb push");
+        }
+
         startEasyTier();
       } catch (Exception e) {
         logLine("[EasyTier] 内置二进制释放失败，尝试网络下载: " + e.getMessage());
@@ -153,22 +182,94 @@ public class EasyTierManager {
     });
   }
 
-  private boolean copyToLocalTmp() {
+  private boolean tryLocalCopyToTmp() {
     try {
+      Process test = Runtime.getRuntime().exec(new String[] { "sh", "-c", "ls -ld /data/local/tmp/ ; id ; whoami" });
+      BufferedReader tr = new BufferedReader(new InputStreamReader(test.getInputStream()));
+      StringBuilder sb = new StringBuilder();
+      String l;
+      while ((l = tr.readLine()) != null) sb.append(l).append("|");
+      tr.close();
+      test.waitFor();
+      logLine("[EasyTier] tmp env: " + sb);
       Process p = Runtime.getRuntime().exec(new String[] { "sh", "-c",
-        "cp '" + getBinaryPath() + "' '" + getAltBinaryPath() + "' && chmod 755 '" + getAltBinaryPath() + "'" });
+        "cat \"" + getBinaryPath() + "\" > \"" + getAltBinaryPath() + "\" && chmod 755 \"" + getAltBinaryPath() + "\"" });
       int exit = p.waitFor();
-      logLine("[EasyTier] copy to tmp exit=" + exit + ", mode=" + getFileMode(getAltBinaryPath()));
-      return exit == 0;
+      return exit == 0 && new File(getAltBinaryPath()).canExecute();
     } catch (Exception e) {
-      logLine("[EasyTier] copy to tmp failed: " + e.getMessage());
       return false;
     }
   }
 
+  private boolean adbPushToDeviceTmp(Device dev) {
+    try {
+      final boolean[] done = { false };
+      final boolean[] ok = { false };
+      InputStream is = AppData.applicationContext.getAssets().open(BINARY_NAME);
+      AdbTools.pushToLocalTmp(dev, is, BINARY_NAME, code -> {
+        ok[0] = code == 0;
+        done[0] = true;
+      });
+      long deadline = System.currentTimeMillis() + 60000;
+      while (!done[0] && System.currentTimeMillis() < deadline) Thread.sleep(200);
+      is.close();
+      return ok[0];
+    } catch (Exception e) {
+      logLine("[EasyTier] adb push 异常: " + e.getMessage());
+      return false;
+    }
+  }
+
+  private void launchOnDevice(Device dev) {
+    // 通过 adb shell chmod + 后台启动 easytier-core，读 ifconfig tun0 拿 VPN IP
+    executor.execute(() -> {
+      try {
+        String remoteTmp = "/data/local/tmp/" + BINARY_NAME;
+        String remoteConf = "/data/local/tmp/easytier.conf";
+
+        // 写配置文件到本地，adb push 上去
+        String secret = AppData.setting.getEasyTierSecret();
+        String networkName = AppData.setting.getEasyTierNetworkName();
+        int port = AppData.setting.getEasyTierPort();
+        boolean usePublic = AppData.setting.getEasyTierUsePublic();
+        String server = AppData.setting.getEasyTierServer();
+        String conf = buildConfig(secret, networkName, port, usePublic, server);
+
+        // 先本地写好
+        File confFile = new File(AppData.applicationContext.getFilesDir(), "easytier.conf");
+        writeFile(confFile, conf);
+        // push config
+        final boolean[] confDone = { false };
+        AdbTools.pushToLocalTmp(dev, new java.io.ByteArrayInputStream(conf.getBytes(StandardCharsets.UTF_8)), "easytier.conf", code -> confDone[0] = (code == 0));
+        long deadline = System.currentTimeMillis() + 30000;
+        while (!confDone[0] && System.currentTimeMillis() < deadline) Thread.sleep(200);
+
+        // chmod + 启动
+        AdbTools.runOnceCmd(dev, "chmod 755 " + remoteTmp + " && nohup " + remoteTmp + " -c " + remoteConf + " > /data/local/tmp/easytier.log 2>&1 &", success -> {
+          logLine("[EasyTier] 远程启动: " + (success ? "ok" : "fail"));
+        });
+
+        // 等几秒拿 VPN IP
+        Thread.sleep(8000);
+        AdbTools.runOnceCmd(dev, "ifconfig tun0 2>/dev/null | grep -oE 'inet [0-9.]+' | head -1", success -> {});
+        // 这里 ifconfig 输出需要另一条指令拿到，简化直接 cat /proc/net/dev 或 ifconfig 全文
+        AdbTools.runOnceCmd(dev, "ip addr show tun0 2>/dev/null || ifconfig tun0 2>/dev/null", success -> {});
+
+        status = STATUS_RUNNING;
+        mainHandler.post(() -> {
+          if (listener != null) listener.onStatusChanged(status, "(设备端运行)");
+        });
+      } catch (Exception e) {
+        logLine("[EasyTier] 远程启动失败: " + e.getMessage());
+        status = STATUS_ERROR;
+        notifyStatus();
+      }
+    });
+  }
+
   private String getFileMode(String path) {
     try {
-      Process p = Runtime.getRuntime().exec(new String[] { "sh", "-c", "ls -l '" + path + "'" });
+      Process p = Runtime.getRuntime().exec(new String[] { "sh", "-c", "ls -l \"" + path + "\"" });
       BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()));
       String line = r.readLine();
       r.close();
