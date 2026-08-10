@@ -443,6 +443,8 @@ public class EasyTierManager {
 
     // 虚拟 IPv4 配置：DHCP 或手动指定
     if (!dhcpEnabled && virtualIp != null && !virtualIp.trim().isEmpty()) {
+      // 必须显式关闭 DHCP，否则 EasyTier 走 DHCP 自动分配并忽略手设 ipv4
+      sb.append("dhcp = false\n");
       sb.append("ipv4 = \"").append(virtualIp.trim()).append("\"\n");
     }
 
