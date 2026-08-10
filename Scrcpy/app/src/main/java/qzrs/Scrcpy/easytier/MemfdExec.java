@@ -1,67 +1,52 @@
 package qzrs.Scrcpy.easytier;
 
-import android.system.Os;
+import android.os.ParcelFileDescriptor;
 import android.util.Log;
 
 import java.io.FileDescriptor;
-import java.nio.ByteBuffer;
-import java.util.Map;
+import java.io.FileInputStream;
 
 /**
  * 通过 memfd_create + fork + execve 在内存中执行 ELF 字节流，
- * 绕过 Android 对 app 私有目录的 noexec 挂载限制（无需 root，无需 NDK）。
+ * 绕过 Android 对 app 私有目录的 noexec 挂载限制（无需 root，无需 NDK 在 CI 中编译）。
  *
- * 这正是 Termux 解决 noexec 的底层技术（termux-exec 的等价实现）。
+ * 实际 fork/execve 由原生库 libexecmem.so 完成（见 cpp/execmem.c），
+ * 因为 android.system.Os 并未暴露 fork/execve。
  */
 public final class MemfdExec {
   private static final String TAG = "MemfdExec";
 
+  static {
+    System.loadLibrary("execmem");
+  }
+
   public static class ExecHandle {
     public final int pid;
-    public final FileDescriptor out;
-    ExecHandle(int pid, FileDescriptor out) {
+    public final FileInputStream out;
+    ExecHandle(int pid, FileInputStream out) {
       this.pid = pid;
       this.out = out;
     }
   }
 
-  /**
-   * 在子进程中执行 ELF。父进程返回子进程 pid 与用于读取 stdout/stderr 的管道读端。
-   * 子进程 execve 成功后永不返回；失败则 exit(1)。
-   */
+  // 高32位=pid, 低32位=管道读端fd
+  private static native long nativeExec(byte[] elf, String[] argv);
+  private static native void nativeKill(int pid);
+
   public static ExecHandle exec(byte[] elf, String[] argv) throws Exception {
-    FileDescriptor[] pipe = Os.pipe();
-    FileDescriptor readEnd = pipe[0];
-    FileDescriptor writeEnd = pipe[1];
+    long combo = nativeExec(elf, argv);
+    if (combo < 0) throw new RuntimeException("nativeExec 失败");
+    int pid = (int) (combo >>> 32);
+    int fd = (int) (combo & 0xffffffffL);
+    ParcelFileDescriptor pfd = ParcelFileDescriptor.adoptFd(fd);
+    return new ExecHandle(pid, new FileInputStream(pfd.getFileDescriptor()));
+  }
 
-    Map<String, String> envMap = System.getenv();
-    String[] envp = new String[envMap.size()];
-    int i = 0;
-    for (Map.Entry<String, String> e : envMap.entrySet()) {
-      envp[i++] = e.getKey() + "=" + e.getValue();
+  public static void kill(int pid) {
+    try {
+      nativeKill(pid);
+    } catch (Throwable t) {
+      Log.e(TAG, "kill fail", t);
     }
-
-    int pid = Os.fork();
-    if (pid == 0) {
-      try {
-        Os.dup2(writeEnd, 1);
-        Os.dup2(writeEnd, 2);
-        Os.close(readEnd);
-
-        FileDescriptor fd = Os.memfd_create("ezbin", 0);
-        ByteBuffer buf = ByteBuffer.wrap(elf);
-        while (buf.hasRemaining()) {
-          Os.write(fd, buf);
-        }
-        Os.execve("/proc/self/fd/" + fd.getInt(), argv, envp);
-      } catch (Throwable t) {
-        Log.e(TAG, "child exec failed", t);
-      }
-      System.exit(1);
-      return null; // unreachable
-    }
-
-    Os.close(writeEnd);
-    return new ExecHandle(pid, readEnd);
   }
 }

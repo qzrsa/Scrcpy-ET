@@ -3,8 +3,6 @@ package qzrs.Scrcpy.easytier;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
-import android.system.Os;
-import android.system.OsConstants;
 import android.util.Log;
 import android.widget.Toast;
 
@@ -39,7 +37,6 @@ public class EasyTierManager {
 
   private static EasyTierManager instance;
   private int execPid = -1;
-  private FileDescriptor outReadFd;
   private volatile boolean childRunning = false;
   private ExecutorService executor = Executors.newSingleThreadExecutor();
   private Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -137,11 +134,9 @@ public class EasyTierManager {
 
   public void stop() {
     executor.execute(() -> {
-      try {
-        if (execPid > 0) {
-          Os.kill(execPid, OsConstants.SIGKILL);
-        }
-      } catch (Exception ignored) {}
+      if (execPid > 0) {
+        MemfdExec.kill(execPid);
+      }
       execPid = -1;
       childRunning = false;
       status = STATUS_STOPPED;
@@ -322,7 +317,6 @@ public class EasyTierManager {
         logLine("[EasyTier] 通过 memfd 启动（无 root / 绕过 noexec）...");
         MemfdExec.ExecHandle h = MemfdExec.exec(elf, argv);
         execPid = h.pid;
-        outReadFd = h.out;
         childRunning = true;
         status = STATUS_RUNNING;
         mainHandler.post(() -> {
@@ -331,8 +325,7 @@ public class EasyTierManager {
         logLine("[EasyTier] 子进程 pid=" + execPid);
 
         // 读子进程输出
-        FileInputStream fis = new FileInputStream(outReadFd);
-        BufferedReader reader = new BufferedReader(new InputStreamReader(fis, StandardCharsets.UTF_8));
+        BufferedReader reader = new BufferedReader(new InputStreamReader(h.out, StandardCharsets.UTF_8));
         String line;
         boolean ipFound = false;
 
