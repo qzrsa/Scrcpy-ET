@@ -97,7 +97,7 @@ public class EasyTierManager {
     if (binary.exists()) {
       startEasyTier();
     } else {
-      downloadBinary();
+      extractBundledBinary();
     }
   }
 
@@ -115,6 +115,32 @@ public class EasyTierManager {
       mainHandler.post(() -> {
         if (listener != null) listener.onStatusChanged(status, "");
       });
+    });
+  }
+
+  // ==================== 内置二进制 ====================
+
+  private void extractBundledBinary() {
+    executor.execute(() -> {
+      try {
+        logLine("[EasyTier] 释放内置二进制...");
+        File binary = new File(getBinaryPath());
+        InputStream in = AppData.applicationContext.getAssets().open(BINARY_NAME);
+        FileOutputStream out = new FileOutputStream(binary);
+        byte[] buf = new byte[8192];
+        int len;
+        while ((len = in.read(buf)) != -1) {
+          out.write(buf, 0, len);
+        }
+        out.close();
+        in.close();
+        chmodBinary();
+        logLine("[EasyTier] 内置二进制释放完成");
+        startEasyTier();
+      } catch (Exception e) {
+        logLine("[EasyTier] 内置二进制释放失败，尝试网络下载: " + e.getMessage());
+        downloadBinary();
+      }
     });
   }
 
@@ -206,7 +232,8 @@ public class EasyTierManager {
   }
 
   private void chmodBinary() throws Exception {
-    Process p = Runtime.getRuntime().exec("chmod 755 " + getBinaryPath());
+    String path = getBinaryPath();
+    Process p = Runtime.getRuntime().exec(new String[] { "sh", "-c", "chmod 755 '" + path + "'" });
     p.waitFor();
   }
 
