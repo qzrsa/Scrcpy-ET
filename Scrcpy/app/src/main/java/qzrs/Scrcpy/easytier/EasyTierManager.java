@@ -464,7 +464,13 @@ public class EasyTierManager {
     // 公网中继节点段
     if (usePublic && server != null && !server.trim().isEmpty()) {
       sb.append("[[peer]]\n");
-      sb.append("uri = \"").append(server.trim()).append("\"\n");
+      String uri = server.trim();
+      // TOML 解析器要求 URI 必须带 scheme（tcp/udp/ws等），裸 IP 会报错
+      if (!uri.contains("://")) {
+        if (!uri.contains(":")) uri = uri + ":" + port;
+        uri = "tcp://" + uri;
+      }
+      sb.append("uri = \"").append(uri).append("\"\n");
       sb.append("\n");
     }
     // 高级 flags 段：tun 网卡 + 本地 SOCKS5
