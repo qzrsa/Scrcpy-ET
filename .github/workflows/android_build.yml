@@ -220,7 +220,7 @@ jobs:
             for g in /tmp/gradle_server.log /tmp/gradle_app.log; do
               if [ -f "$g" ]; then
                 echo "=== ${g} (error context) ==="
-                grep -Ei "what went wrong|> Task .* FAILED|BUILD FAILED|error:|exception|failed" "$g" | tail -60 > /tmp/gerr.txt
+                grep -Ei "what went wrong|> Task .* FAILED|BUILD FAILED|error:|exception|failed|symbol:|location:|\^" "$g" | tail -80 > /tmp/gerr.txt
                 if [ ! -s /tmp/gerr.txt ]; then
                   if grep -q "BUILD SUCCESSFUL" "$g"; then echo "(gradle BUILD SUCCESSFUL)"; else tail -40 "$g"; fi > /tmp/gerr.txt
                 fi
