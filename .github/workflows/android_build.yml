@@ -100,68 +100,98 @@ jobs:
         env:
           NDK_PATH: ${{ steps.setup_ndk.outputs.ndk-path }}
         run: |
-          set -o pipefail
-          # Create the log FIRST, at a path provided by Actions (not the shell's
-          # GITHUB_WORKSPACE var, which can be empty), so the upload step can always
-          # find it even if a later command aborts the script.
+          # NOTE: GitHub's default `run:` shell is `bash -e -o pipefail`, so any
+          # non-zero command aborts the whole step. That is almost certainly why the
+          # previous runs stopped right after `rustup target add` (which can return
+          # non-zero when the target is already present) and never reached `cargo
+          # build`. We disable -e here so every command runs and the FULL trace is
+          # captured into the log regardless of intermediate failures.
+          set +e
           LOG="${{ github.workspace }}/easytier_build.log"
           : > "$LOG"
-          echo "BUILD STEP START PWD=$(pwd) WS=$GITHUB_WORKSPACE GHWS=${{ github.workspace }}" >> "$LOG"
-          sudo apt-get update >> "$LOG" 2>&1
-          sudo apt-get install -y protobuf-compiler clang pkg-config >> "$LOG" 2>&1
-          rustup target add aarch64-linux-android >> "$LOG" 2>&1
-          TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
-          CLANG="$TOOLCHAIN/bin/aarch64-linux-android21-clang"
-          mkdir -p ~/.cargo
-          printf '[target.aarch64-linux-android]\nlinker = "%s"\n' "$CLANG" > ~/.cargo/config.toml
-          # A cdylib (.so) MUST link the C runtime dynamically. The +crt-static flag
-          # (used for static binaries, see easytier-android-build) makes cargo reject
-          # a cdylib with "does not support these crate types", so force -crt-static.
-          # Point the NDK C/C++ toolchain at the right clang/ar/sysroot so any C deps
-          # pulled in by easytier-core (openssl-sys, libsqlite3-sys, protobuf, ...) resolve.
-          export SYSROOT="$TOOLCHAIN/sysroot"
-          export ANDROID_NDK_HOME="$NDK_PATH"
-          export PROTOC=/usr/bin/protoc
-          export CC_aarch64_linux_android="$TOOLCHAIN/bin/aarch64-linux-android21-clang"
-          export CXX_aarch64_linux_android="$TOOLCHAIN/bin/aarch64-linux-android21-clang++"
-          export AR_aarch64_linux_android="$TOOLCHAIN/bin/llvm-ar"
-          export CC_aarch64-linux-android="$TOOLCHAIN/bin/aarch64-linux-android21-clang"
-          export CXX_aarch64-linux-android="$TOOLCHAIN/bin/aarch64-linux-android21-clang++"
-          export AR_aarch64-linux-android="$TOOLCHAIN/bin/llvm-ar"
-          export CFLAGS_aarch64_linux_android="--sysroot=$SYSROOT"
-          export CXXFLAGS_aarch64_linux_android="--sysroot=$SYSROOT"
-          export BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android="--sysroot=$SYSROOT"
-          export CFLAGS_aarch64-linux-android="--sysroot=$SYSROOT"
-          export CXXFLAGS_aarch64-linux-android="--sysroot=$SYSROOT"
-          export BINDGEN_EXTRA_CLANG_ARGS_aarch64-linux-android="--sysroot=$SYSROOT"
-          export TARGET_CC="$TOOLCHAIN/bin/aarch64-linux-android21-clang"
-          export TARGET_CFLAGS="--sysroot=$SYSROOT"
-          echo "cargo build --manifest-path Scrcpy/easytier-lib/Cargo.toml --release --target aarch64-linux-android" >> "$LOG"
-          RUSTFLAGS="-C target-feature=-crt-static" cargo build --manifest-path Scrcpy/easytier-lib/Cargo.toml --release --target aarch64-linux-android 2>&1 | tee -a "$LOG"
-          if [ -f Scrcpy/easytier-lib/target/aarch64-linux-android/release/libeasytier_android.so ]; then
-            mkdir -p Scrcpy/app/src/main/jniLibs/arm64-v8a
-            cp Scrcpy/easytier-lib/target/aarch64-linux-android/release/libeasytier_android.so Scrcpy/app/src/main/jniLibs/arm64-v8a/
-            ls -l Scrcpy/app/src/main/jniLibs/arm64-v8a/ >> "$LOG"
-          else
-            echo "Build did not produce libeasytier_android.so (see easytier_build.log)" >> "$LOG"
-          fi
+          {
+            set -x
+            echo "BUILD STEP START PWD=$(pwd) WS=$GITHUB_WORKSPACE GHWS=${{ github.workspace }}"
+            sudo apt-get update
+            sudo apt-get install -y protobuf-compiler clang pkg-config
+            rustup target add aarch64-linux-android; echo "rustup target add rc=$?"
 
-      - name: Surface EasyTier build error
-        # On a failed build, publish the extracted error lines into a PUBLIC release
-        # BODY. The release body is readable via the public GET /releases API without
-        # repo-admin rights, so the exact error can be inspected remotely. (Raw job
-        # logs and release ASSETS both require admin; the body does not.)
-        if: failure()
+            # Resolve NDK path robustly. The setup-ndk action's output name can vary,
+            # and env propagation into `run:` is not guaranteed, so probe several vars.
+            NDK_PATH="${NDK_PATH:-$ANDROID_NDK_ROOT}"
+            NDK_PATH="${NDK_PATH:-$ANDROID_NDK_HOME}"
+            if [ -z "$NDK_PATH" ] && [ -n "$ANDROID_HOME" ]; then
+              NDK_PATH=$(ls -d "$ANDROID_HOME"/ndk/* 2>/dev/null | head -1)
+            fi
+            echo "NDK_PATH=[$NDK_PATH]"
+            [ -n "$NDK_PATH" ] || echo "WARNING: NDK_PATH empty; linker path will be wrong"
+
+            TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
+            CLANG="$TOOLCHAIN/bin/aarch64-linux-android21-clang"
+            echo "TOOLCHAIN=[$TOOLCHAIN] CLANG=[$CLANG]"
+            ls -l "$CLANG" 2>&1 || echo "CLANG binary missing"
+            mkdir -p ~/.cargo
+            printf '[target.aarch64-linux-android]\nlinker = "%s"\n' "$CLANG" > ~/.cargo/config.toml
+            echo "--- ~/.cargo/config.toml ---"
+            cat ~/.cargo/config.toml
+
+            # A cdylib (.so) MUST link the C runtime dynamically. The +crt-static flag
+            # (used for static binaries, see easytier-android-build) makes cargo reject
+            # a cdylib with "does not support these crate types", so force -crt-static.
+            # Point the NDK C/C++ toolchain at the right clang/ar/sysroot so any C deps
+            # pulled in by easytier-core (openssl-sys, libsqlite3-sys, protobuf, ...) resolve.
+            export SYSROOT="$TOOLCHAIN/sysroot"
+            export ANDROID_NDK_HOME="$NDK_PATH"
+            export PROTOC=/usr/bin/protoc
+            export CC_aarch64_linux_android="$TOOLCHAIN/bin/aarch64-linux-android21-clang"
+            export CXX_aarch64_linux_android="$TOOLCHAIN/bin/aarch64-linux-android21-clang++"
+            export AR_aarch64_linux_android="$TOOLCHAIN/bin/llvm-ar"
+            export CC_aarch64-linux-android="$TOOLCHAIN/bin/aarch64-linux-android21-clang"
+            export CXX_aarch64-linux-android="$TOOLCHAIN/bin/aarch64-linux-android21-clang++"
+            export AR_aarch64-linux-android="$TOOLCHAIN/bin/llvm-ar"
+            export CFLAGS_aarch64_linux_android="--sysroot=$SYSROOT"
+            export CXXFLAGS_aarch64_linux_android="--sysroot=$SYSROOT"
+            export BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android="--sysroot=$SYSROOT"
+            export CFLAGS_aarch64-linux-android="--sysroot=$SYSROOT"
+            export CXXFLAGS_aarch64-linux-android="--sysroot=$SYSROOT"
+            export BINDGEN_EXTRA_CLANG_ARGS_aarch64-linux-android="--sysroot=$SYSROOT"
+            export TARGET_CC="$TOOLCHAIN/bin/aarch64-linux-android21-clang"
+            export TARGET_CFLAGS="--sysroot=$SYSROOT"
+            echo "ENV SET, running cargo build"
+            RUSTFLAGS="-C target-feature=-crt-static" cargo build --manifest-path Scrcpy/easytier-lib/Cargo.toml --release --target aarch64-linux-android
+            BUILD_RC=$?
+            echo "cargo build exit code: $BUILD_RC"
+            if [ -f Scrcpy/easytier-lib/target/aarch64-linux-android/release/libeasytier_android.so ]; then
+              mkdir -p Scrcpy/app/src/main/jniLibs/arm64-v8a
+              cp Scrcpy/easytier-lib/target/aarch64-linux-android/release/libeasytier_android.so Scrcpy/app/src/main/jniLibs/arm64-v8a/
+              ls -l Scrcpy/app/src/main/jniLibs/arm64-v8a/
+            else
+              echo "Build did not produce libeasytier_android.so"
+            fi
+            exit $BUILD_RC
+          } >> "$LOG" 2>&1
+
+      - name: Surface EasyTier build log
+        # Publish the build log (errors OR success marker) into a PUBLIC release BODY.
+        # The release body is readable via the public GET /releases API without
+        # repo-admin rights (raw job logs and release ASSETS both require admin).
+        if: always()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           LOG="${{ github.workspace }}/easytier_build.log"
           if [ ! -f "$LOG" ]; then LOG="easytier_build.log"; fi
           if [ -f "$LOG" ]; then
-            grep -Ei "error|panic|undefined reference|linker command|exit code|failed|cannot|not found|signal|killed" "$LOG" | tail -90 > /tmp/err.txt
-            if [ ! -s /tmp/err.txt ]; then tail -90 "$LOG" > /tmp/err.txt; fi
+            if grep -q "cargo build exit code: 0" "$LOG"; then
+              BODY=$(grep -E "cargo build exit code|libeasytier_android.so|BUILD STEP START|NDK_PATH|TOOLCHAIN" "$LOG" | tail -40)
+              BODY=$'BUILD OK\n'"$BODY"
+            else
+              grep -Ei "error|panic|undefined reference|linker command|exit code|failed|cannot|not found|signal|killed" "$LOG" | tail -90 > /tmp/err.txt
+              if [ ! -s /tmp/err.txt ]; then tail -120 "$LOG" > /tmp/err.txt; fi
+              BODY=$(cat /tmp/err.txt)
+            fi
           else
-            {
+            BODY=$({
               echo "LOG FILE MISSING"
               echo "PWD=$(pwd)"
               echo "GITHUB_WORKSPACE=$GITHUB_WORKSPACE"
@@ -170,13 +200,14 @@ jobs:
               ls -la "${{ github.workspace }}" | head -30
               echo "--- ls Scrcpy ---"
               ls -la "${{ github.workspace }}/Scrcpy" 2>&1 | head -30
-            } > /tmp/err.txt
+            })
           fi
-          BODY=$(cat /tmp/err.txt)
+          # Cap body size to avoid GitHub 422 (body too large).
+          if [ "${#BODY}" -gt 60000 ]; then BODY=$(printf '%s\n...\n[truncated]\n%s' "$(echo "$BODY" | head -c 30000)" "$(echo "$BODY" | tail -c 30000)"); fi
           curl -s -X POST -H "Authorization: Bearer $GITHUB_TOKEN" -H "Content-Type: application/json" \
             -d "$(jq -n --arg tag "ci-log-${{ github.run_id }}" --arg body "$BODY" '{tag_name:$tag,name:$tag,prerelease:true,body:$body}')" \
             "https://api.github.com/repos/${{ github.repository }}/releases"
-          echo "published error to release ci-log-${{ github.run_id }}"
+          echo "published build log to release ci-log-${{ github.run_id }}"
 
       - name: Grant execute permission for gradlew
         run: chmod +x Scrcpy/gradlew
