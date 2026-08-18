@@ -74,7 +74,8 @@ fn stop_network(id: String) -> anyhow::Result<()> {
     runtime().block_on(async move {
         mgr.delete_network_instances([uuid])
             .await
-            .map_err(|e| anyhow::anyhow!("stop: {e}"))
+            .map_err(|e| anyhow::anyhow!("stop: {e}"))?;
+        Ok(())
     })
 }
 
