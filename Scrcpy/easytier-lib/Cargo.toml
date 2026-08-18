@@ -24,5 +24,7 @@ easytier-core = { git = "https://github.com/EasyTier/EasyTier", package = "easyt
 
 [profile.release]
 opt-level = "z"
-lto = true
+# Full LTO over the whole EasyTier tree risks a CI timeout; "thin" is plenty for
+# size and far faster to link on the cross-compile runner.
+lto = "thin"
 strip = true

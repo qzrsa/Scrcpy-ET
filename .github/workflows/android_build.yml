@@ -112,7 +112,29 @@ jobs:
           linker = "$CLANG"
           EOF
           cd Scrcpy/easytier-lib
-          RUSTFLAGS="-C target-feature=+crt-static" cargo build --release --target aarch64-linux-android
+          # A cdylib (.so) MUST link the C runtime dynamically. The +crt-static flag
+          # (used for static binaries, see easytier-android-build) makes cargo reject
+          # a cdylib with "does not support these crate types", so force -crt-static.
+          # Point the NDK C/C++ toolchain at the right clang/ar/sysroot so any C deps
+          # pulled in by easytier-core (openssl-sys, libsqlite3-sys, protobuf, ...) resolve.
+          export SYSROOT="$TOOLCHAIN/sysroot"
+          export ANDROID_NDK_HOME="$NDK_PATH"
+          export PROTOC=/usr/bin/protoc
+          export CC_aarch64_linux_android="$TOOLCHAIN/bin/aarch64-linux-android21-clang"
+          export CXX_aarch64_linux_android="$TOOLCHAIN/bin/aarch64-linux-android21-clang++"
+          export AR_aarch64_linux_android="$TOOLCHAIN/bin/llvm-ar"
+          export CC_aarch64-linux-android="$TOOLCHAIN/bin/aarch64-linux-android21-clang"
+          export CXX_aarch64-linux-android="$TOOLCHAIN/bin/aarch64-linux-android21-clang++"
+          export AR_aarch64-linux-android="$TOOLCHAIN/bin/llvm-ar"
+          export CFLAGS_aarch64_linux_android="--sysroot=$SYSROOT"
+          export CXXFLAGS_aarch64_linux_android="--sysroot=$SYSROOT"
+          export BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android="--sysroot=$SYSROOT"
+          export CFLAGS_aarch64-linux-android="--sysroot=$SYSROOT"
+          export CXXFLAGS_aarch64-linux-android="--sysroot=$SYSROOT"
+          export BINDGEN_EXTRA_CLANG_ARGS_aarch64-linux-android="--sysroot=$SYSROOT"
+          export TARGET_CC="$TOOLCHAIN/bin/aarch64-linux-android21-clang"
+          export TARGET_CFLAGS="--sysroot=$SYSROOT"
+          RUSTFLAGS="-C target-feature=-crt-static" cargo build --release --target aarch64-linux-android
           mkdir -p ../app/src/main/jniLibs/arm64-v8a
           cp target/aarch64-linux-android/release/libeasytier_android.so ../app/src/main/jniLibs/arm64-v8a/
           ls -l ../app/src/main/jniLibs/arm64-v8a/
