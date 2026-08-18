@@ -101,10 +101,15 @@ jobs:
           NDK_PATH: ${{ steps.setup_ndk.outputs.ndk-path }}
         run: |
           set -o pipefail
-          sudo apt-get update
-          sudo apt-get install -y protobuf-compiler clang pkg-config
-          # Ensure the Android std is present for whatever toolchain cargo resolves.
-          rustup target add aarch64-linux-android
+          # Create the log FIRST, at a path provided by Actions (not the shell's
+          # GITHUB_WORKSPACE var, which can be empty), so the upload step can always
+          # find it even if a later command aborts the script.
+          LOG="${{ github.workspace }}/easytier_build.log"
+          : > "$LOG"
+          echo "BUILD STEP START PWD=$(pwd) WS=$GITHUB_WORKSPACE GHWS=${{ github.workspace }}" >> "$LOG"
+          sudo apt-get update >> "$LOG" 2>&1
+          sudo apt-get install -y protobuf-compiler clang pkg-config >> "$LOG" 2>&1
+          rustup target add aarch64-linux-android >> "$LOG" 2>&1
           TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
           CLANG="$TOOLCHAIN/bin/aarch64-linux-android21-clang"
           mkdir -p ~/.cargo
@@ -131,19 +136,14 @@ jobs:
           export BINDGEN_EXTRA_CLANG_ARGS_aarch64-linux-android="--sysroot=$SYSROOT"
           export TARGET_CC="$TOOLCHAIN/bin/aarch64-linux-android21-clang"
           export TARGET_CFLAGS="--sysroot=$SYSROOT"
-          # Write the log to an absolute, cd-independent path so the upload step
-          # (which runs from the repo root) can always find it.
-          LOG="$GITHUB_WORKSPACE/easytier_build.log"
-          : > "$LOG"
-          echo "PWD=$(pwd)" >> "$LOG"
           echo "cargo build --manifest-path Scrcpy/easytier-lib/Cargo.toml --release --target aarch64-linux-android" >> "$LOG"
           RUSTFLAGS="-C target-feature=-crt-static" cargo build --manifest-path Scrcpy/easytier-lib/Cargo.toml --release --target aarch64-linux-android 2>&1 | tee -a "$LOG"
           if [ -f Scrcpy/easytier-lib/target/aarch64-linux-android/release/libeasytier_android.so ]; then
             mkdir -p Scrcpy/app/src/main/jniLibs/arm64-v8a
             cp Scrcpy/easytier-lib/target/aarch64-linux-android/release/libeasytier_android.so Scrcpy/app/src/main/jniLibs/arm64-v8a/
-            ls -l Scrcpy/app/src/main/jniLibs/arm64-v8a/
+            ls -l Scrcpy/app/src/main/jniLibs/arm64-v8a/ >> "$LOG"
           else
-            echo "Build did not produce libeasytier_android.so (see easytier_build.log)"
+            echo "Build did not produce libeasytier_android.so (see easytier_build.log)" >> "$LOG"
           fi
 
       - name: Surface EasyTier build error
@@ -155,13 +155,22 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          LOG="$GITHUB_WORKSPACE/easytier_build.log"
+          LOG="${{ github.workspace }}/easytier_build.log"
           if [ ! -f "$LOG" ]; then LOG="easytier_build.log"; fi
           if [ -f "$LOG" ]; then
             grep -Ei "error|panic|undefined reference|linker command|exit code|failed|cannot|not found|signal|killed" "$LOG" | tail -90 > /tmp/err.txt
             if [ ! -s /tmp/err.txt ]; then tail -90 "$LOG" > /tmp/err.txt; fi
           else
-            echo "LOG FILE MISSING" > /tmp/err.txt
+            {
+              echo "LOG FILE MISSING"
+              echo "PWD=$(pwd)"
+              echo "GITHUB_WORKSPACE=$GITHUB_WORKSPACE"
+              echo "github.workspace=${{ github.workspace }}"
+              echo "--- ls workspace ---"
+              ls -la "${{ github.workspace }}" | head -30
+              echo "--- ls Scrcpy ---"
+              ls -la "${{ github.workspace }}/Scrcpy" 2>&1 | head -30
+            } > /tmp/err.txt
           fi
           BODY=$(cat /tmp/err.txt)
           curl -s -X POST -H "Authorization: Bearer $GITHUB_TOKEN" -H "Content-Type: application/json" \
