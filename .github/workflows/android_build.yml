@@ -180,28 +180,33 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           LOG="${{ github.workspace }}/easytier_build.log"
-          if [ ! -f "$LOG" ]; then LOG="easytier_build.log"; fi
-          if [ -f "$LOG" ]; then
-            if grep -q "cargo build exit code: 0" "$LOG"; then
-              BODY=$(grep -E "cargo build exit code|libeasytier_android.so|BUILD STEP START|NDK_PATH|TOOLCHAIN" "$LOG" | tail -40)
-              BODY=$'BUILD OK\n'"$BODY"
+          [ -f "$LOG" ] || LOG="easytier_build.log"
+          {
+            if [ -f "$LOG" ] && grep -q "cargo build exit code: 0" "$LOG"; then
+              echo "BUILD OK (native .so built)"
+              grep -E "cargo build exit code|libeasytier_android.so|NDK_PATH|TOOLCHAIN" "$LOG" | tail -20
             else
-              grep -Ei "error|panic|undefined reference|linker command|exit code|failed|cannot|not found|signal|killed" "$LOG" | tail -90 > /tmp/err.txt
-              if [ ! -s /tmp/err.txt ]; then tail -120 "$LOG" > /tmp/err.txt; fi
-              BODY=$(cat /tmp/err.txt)
+              echo "=== NATIVE BUILD FAILED ==="
+              if [ -f "$LOG" ]; then
+                grep -Ei "error|panic|undefined reference|linker command|exit code|failed|cannot|not found|signal|killed" "$LOG" | tail -90 > /tmp/err.txt
+                [ -s /tmp/err.txt ] || tail -120 "$LOG" > /tmp/err.txt
+                cat /tmp/err.txt
+              else
+                echo "NATIVE LOG MISSING"; echo "PWD=$(pwd)"; ls -la "${{ github.workspace }}" | head -20
+              fi
             fi
-          else
-            BODY=$({
-              echo "LOG FILE MISSING"
-              echo "PWD=$(pwd)"
-              echo "GITHUB_WORKSPACE=$GITHUB_WORKSPACE"
-              echo "github.workspace=${{ github.workspace }}"
-              echo "--- ls workspace ---"
-              ls -la "${{ github.workspace }}" | head -30
-              echo "--- ls Scrcpy ---"
-              ls -la "${{ github.workspace }}/Scrcpy" 2>&1 | head -30
-            })
-          fi
+            for g in /tmp/gradle_server.log /tmp/gradle_app.log; do
+              if [ -f "$g" ]; then
+                echo "=== ${g} (error context) ==="
+                grep -Ei "what went wrong|> Task .* FAILED|BUILD FAILED|error:|exception|failed" "$g" | tail -60 > /tmp/gerr.txt
+                if [ ! -s /tmp/gerr.txt ]; then
+                  if grep -q "BUILD SUCCESSFUL" "$g"; then echo "(gradle BUILD SUCCESSFUL)"; else tail -40 "$g"; fi > /tmp/gerr.txt
+                fi
+                cat /tmp/gerr.txt
+              fi
+            done
+          } > /tmp/body.txt
+          BODY=$(cat /tmp/body.txt)
           # Cap body size to avoid GitHub 422 (body too large).
           if [ "${#BODY}" -gt 60000 ]; then BODY=$(printf '%s\n...\n[truncated]\n%s' "$(echo "$BODY" | head -c 30000)" "$(echo "$BODY" | tail -c 30000)"); fi
           curl -s -X POST -H "Authorization: Bearer $GITHUB_TOKEN" -H "Content-Type: application/json" \
@@ -215,18 +220,18 @@ jobs:
       - name: Build Server
         run: |
           cd Scrcpy
-          ./gradlew :server:copyRelease --no-daemon
+          ./gradlew :server:copyRelease --no-daemon > /tmp/gradle_server.log 2>&1
 
       - name: Build App
         run: |
           cd Scrcpy
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             # Signed release APK (requires the keystore secrets above).
-            ./gradlew :app:assembleRelease --no-daemon
+            ./gradlew :app:assembleRelease --no-daemon > /tmp/gradle_app.log 2>&1
           else
             # Push builds: compile a debug APK to verify the whole tree builds
             # without needing any signing secrets.
-            ./gradlew :app:assembleDebug --no-daemon
+            ./gradlew :app:assembleDebug --no-daemon > /tmp/gradle_app.log 2>&1
           fi
 
       - name: Rename APK
