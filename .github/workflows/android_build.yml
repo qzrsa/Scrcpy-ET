@@ -108,10 +108,7 @@ jobs:
           TOOLCHAIN="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
           CLANG="$TOOLCHAIN/bin/aarch64-linux-android21-clang"
           mkdir -p ~/.cargo
-          cat > ~/.cargo/config.toml <<EOF
-          [target.aarch64-linux-android]
-          linker = "$CLANG"
-          EOF
+          printf '[target.aarch64-linux-android]\nlinker = "%s"\n' "$CLANG" > ~/.cargo/config.toml
           # A cdylib (.so) MUST link the C runtime dynamically. The +crt-static flag
           # (used for static binaries, see easytier-android-build) makes cargo reject
           # a cdylib with "does not support these crate types", so force -crt-static.
@@ -149,19 +146,28 @@ jobs:
             echo "Build did not produce libeasytier_android.so (see easytier_build.log)"
           fi
 
-      - name: Upload EasyTier build log on failure
-        # On a failed build, publish the full cargo log as a PUBLIC release asset
-        # (public-repo release assets are downloadable without auth) so the log can
-        # be inspected remotely and the exact error pinpointed.
+      - name: Surface EasyTier build error
+        # On a failed build, publish the extracted error lines into a PUBLIC release
+        # BODY. The release body is readable via the public GET /releases API without
+        # repo-admin rights, so the exact error can be inspected remotely. (Raw job
+        # logs and release ASSETS both require admin; the body does not.)
         if: failure()
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ci-log-${{ github.run_id }}
-          name: EasyTier build log (${{ github.run_id }})
-          prerelease: true
-          files: ${{ github.workspace }}/easytier_build.log
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          LOG="$GITHUB_WORKSPACE/easytier_build.log"
+          if [ ! -f "$LOG" ]; then LOG="easytier_build.log"; fi
+          if [ -f "$LOG" ]; then
+            grep -Ei "error|panic|undefined reference|linker command|exit code|failed|cannot|not found|signal|killed" "$LOG" | tail -90 > /tmp/err.txt
+            if [ ! -s /tmp/err.txt ]; then tail -90 "$LOG" > /tmp/err.txt; fi
+          else
+            echo "LOG FILE MISSING" > /tmp/err.txt
+          fi
+          BODY=$(cat /tmp/err.txt)
+          curl -s -X POST -H "Authorization: Bearer $GITHUB_TOKEN" -H "Content-Type: application/json" \
+            -d "$(jq -n --arg tag "ci-log-${{ github.run_id }}" --arg body "$BODY" '{tag_name:$tag,name:$tag,prerelease:true,body:$body}')" \
+            "https://api.github.com/repos/${{ github.repository }}/releases"
+          echo "published error to release ci-log-${{ github.run_id }}"
 
       - name: Grant execute permission for gradlew
         run: chmod +x Scrcpy/gradlew
