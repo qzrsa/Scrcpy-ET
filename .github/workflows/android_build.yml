@@ -100,6 +100,7 @@ jobs:
         env:
           NDK_PATH: ${{ steps.setup_ndk.outputs.ndk-path }}
         run: |
+          set -o pipefail
           sudo apt-get update
           sudo apt-get install -y protobuf-compiler clang pkg-config
           # Ensure the Android std is present for whatever toolchain cargo resolves.
@@ -134,10 +135,34 @@ jobs:
           export BINDGEN_EXTRA_CLANG_ARGS_aarch64-linux-android="--sysroot=$SYSROOT"
           export TARGET_CC="$TOOLCHAIN/bin/aarch64-linux-android21-clang"
           export TARGET_CFLAGS="--sysroot=$SYSROOT"
-          RUSTFLAGS="-C target-feature=-crt-static" cargo build --release --target aarch64-linux-android
-          mkdir -p ../app/src/main/jniLibs/arm64-v8a
-          cp target/aarch64-linux-android/release/libeasytier_android.so ../app/src/main/jniLibs/arm64-v8a/
-          ls -l ../app/src/main/jniLibs/arm64-v8a/
+          RUSTFLAGS="-C target-feature=-crt-static" cargo build --release --target aarch64-linux-android 2>&1 | tee easytier_build.log
+          if [ -f target/aarch64-linux-android/release/libeasytier_android.so ]; then
+            mkdir -p ../app/src/main/jniLibs/arm64-v8a
+            cp target/aarch64-linux-android/release/libeasytier_android.so ../app/src/main/jniLibs/arm64-v8a/
+            ls -l ../app/src/main/jniLibs/arm64-v8a/
+          else
+            echo "Build did not produce libeasytier_android.so (see easytier_build.log)"
+          fi
+
+      - name: Upload EasyTier build log on failure
+        # On a failed build, publish the full cargo log as a PUBLIC release asset
+        # (public-repo release assets are downloadable without auth) so the log can
+        # be inspected remotely and the exact error pinpointed.
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          LOG=Scrcpy/easytier-lib/easytier_build.log
+          if [ -f "$LOG" ]; then
+            gh release create "ci-log-${{ github.run_id }}" "$LOG" \
+              --repo "${{ github.repository }}" \
+              --title "EasyTier build log (${{ github.run_id }})" \
+              --notes "Auto-uploaded cargo build log from failed CI run ${{ github.run_id }}." \
+              --prerelease
+            echo "Uploaded build log to release ci-log-${{ github.run_id }}"
+          else
+            echo "No build log produced; apt/cargo may have failed before output."
+          fi
 
       - name: Grant execute permission for gradlew
         run: chmod +x Scrcpy/gradlew
