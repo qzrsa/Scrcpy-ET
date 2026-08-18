@@ -171,10 +171,32 @@ jobs:
             exit $BUILD_RC
           } >> "$LOG" 2>&1
 
-      - name: Surface EasyTier build log
-        # Publish the build log (errors OR success marker) into a PUBLIC release BODY.
-        # The release body is readable via the public GET /releases API without
-        # repo-admin rights (raw job logs and release ASSETS both require admin).
+      - name: Grant execute permission for gradlew
+        run: chmod +x Scrcpy/gradlew
+
+      - name: Build Server
+        run: |
+          cd Scrcpy
+          ./gradlew :server:copyRelease --no-daemon > /tmp/gradle_server.log 2>&1
+
+      - name: Build App
+        run: |
+          cd Scrcpy
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Signed release APK (requires the keystore secrets above).
+            ./gradlew :app:assembleRelease --no-daemon > /tmp/gradle_app.log 2>&1
+          else
+            # Push builds: compile a debug APK to verify the whole tree builds
+            # without needing any signing secrets.
+            ./gradlew :app:assembleDebug --no-daemon > /tmp/gradle_app.log 2>&1
+          fi
+
+      - name: Surface build log (native + gradle)
+        # Publish the FULL build log (errors OR success marker) into a PUBLIC release
+        # BODY. Runs LAST so both the native .so log and the gradle logs already
+        # exist on disk. The release body is readable via the public GET /releases
+        # API without repo-admin rights (raw job logs and release ASSETS both require
+        # admin).
         if: always()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -213,26 +235,6 @@ jobs:
             -d "$(jq -n --arg tag "ci-log-${{ github.run_id }}" --arg body "$BODY" '{tag_name:$tag,name:$tag,prerelease:true,body:$body}')" \
             "https://api.github.com/repos/${{ github.repository }}/releases"
           echo "published build log to release ci-log-${{ github.run_id }}"
-
-      - name: Grant execute permission for gradlew
-        run: chmod +x Scrcpy/gradlew
-
-      - name: Build Server
-        run: |
-          cd Scrcpy
-          ./gradlew :server:copyRelease --no-daemon > /tmp/gradle_server.log 2>&1
-
-      - name: Build App
-        run: |
-          cd Scrcpy
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            # Signed release APK (requires the keystore secrets above).
-            ./gradlew :app:assembleRelease --no-daemon > /tmp/gradle_app.log 2>&1
-          else
-            # Push builds: compile a debug APK to verify the whole tree builds
-            # without needing any signing secrets.
-            ./gradlew :app:assembleDebug --no-daemon > /tmp/gradle_app.log 2>&1
-          fi
 
       - name: Rename APK
         if: github.event_name == 'workflow_dispatch'
