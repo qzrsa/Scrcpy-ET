@@ -191,6 +191,16 @@ jobs:
             ./gradlew :app:assembleDebug --no-daemon > /tmp/gradle_app.log 2>&1
           fi
 
+      - name: Upload APK artifact
+        # Make the compiled APK downloadable from the Actions run page even on
+        # push builds (which don't produce a signed release).
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: Scrcpy/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: warn
+
       - name: Surface build log (native + gradle)
         # Publish the FULL build log (errors OR success marker) into a PUBLIC release
         # BODY. Runs LAST so both the native .so log and the gradle logs already
@@ -231,10 +241,28 @@ jobs:
           BODY=$(cat /tmp/body.txt)
           # Cap body size to avoid GitHub 422 (body too large).
           if [ "${#BODY}" -gt 60000 ]; then BODY=$(printf '%s\n...\n[truncated]\n%s' "$(echo "$BODY" | head -c 30000)" "$(echo "$BODY" | tail -c 30000)"); fi
-          curl -s -X POST -H "Authorization: Bearer $GITHUB_TOKEN" -H "Content-Type: application/json" \
+          RESP=$(curl -s -X POST -H "Authorization: Bearer $GITHUB_TOKEN" -H "Content-Type: application/json" \
             -d "$(jq -n --arg tag "ci-log-${{ github.run_id }}" --arg body "$BODY" '{tag_name:$tag,name:$tag,prerelease:true,body:$body}')" \
-            "https://api.github.com/repos/${{ github.repository }}/releases"
+            "https://api.github.com/repos/${{ github.repository }}/releases")
           echo "published build log to release ci-log-${{ github.run_id }}"
+          # Upload the built APK (if present) as a release asset so it is directly
+          # downloadable from the Releases page without repo-admin rights.
+          UPLOAD_URL=$(echo "$RESP" | jq -r '.upload_url // empty' | sed 's/{.*//')
+          APK=""
+          for p in "${{ github.workspace }}/Scrcpy/app/build/outputs/apk/debug/app-debug.apk" \
+                   "${{ github.workspace }}/Scrcpy/app/build/outputs/apk/release/app-release.apk" \
+                   "${{ github.workspace }}/release/Scrcpy.apk"; do
+            [ -f "$p" ] && APK="$p" && break
+          done
+          if [ -n "$UPLOAD_URL" ] && [ -n "$APK" ]; then
+            curl -s -X POST -H "Authorization: Bearer $GITHUB_TOKEN" \
+              -H "Content-Type: application/vnd.android.package-archive" \
+              --data-binary @"$APK" \
+              "$UPLOAD_URL?name=$(basename "$APK")"
+            echo "uploaded APK asset: $(basename "$APK")"
+          else
+            echo "no APK asset uploaded (UPLOAD_URL=${UPLOAD_URL:-EMPTY} APK=${APK:-NONE})"
+          fi
 
       - name: Rename APK
         if: github.event_name == 'workflow_dispatch'
