@@ -1,0 +1,23 @@
+keystore.properties
+
+Scrcpy/*.iml
+Scrcpy/.gradle
+Scrcpy/.idea
+Scrcpy/local.properties
+
+Scrcpy/app/build
+Scrcpy/app/.gradle
+Scrcpy/app/debug
+Scrcpy/app/release
+Scrcpy/app/src/main/res/raw/scrcpy_server.jar
+
+Scrcpy/server/build
+Scrcpy/server/.gradle
+
+# EasyTier native library: built by CI (cargo ndk), do not commit binaries
+Scrcpy/app/src/main/jniLibs/
+easytier-lib/target/
+
+
+# Local WorkBuddy memory/settings (not part of the project)
+.workbuddy/

@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+  android:layout_width="match_parent"
+  android:layout_height="match_parent"
+  android:fitsSystemWindows="true"
+  android:background="@color/background"
+  android:orientation="vertical">
+
+  <LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:padding="16dp">
+
+    <TextView
+      android:layout_width="0dp"
+      android:layout_height="wrap_content"
+      android:layout_weight="1"
+      android:text="@string/easytier_title"
+      android:textColor="@color/onBackground"
+      android:textSize="@dimen/largeFont"
+      android:textStyle="bold" />
+
+    <ImageView
+      android:id="@+id/button_back"
+      android:layout_width="40dp"
+      android:layout_height="40dp"
+      android:padding="8dp"
+      android:src="@drawable/caret_left"
+      android:tint="@color/onBackground" />
+  </LinearLayout>
+
+  <ScrollView
+    android:layout_width="match_parent"
+    android:layout_height="0dp"
+    android:layout_weight="1"
+    android:padding="16dp">
+
+    <LinearLayout
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:orientation="vertical">
+
+      <EditText
+        android:id="@+id/et_network_name"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="@string/easytier_network_name"
+        android:inputType="text"
+        android:text="qzrs_net" />
+
+      <EditText
+        android:id="@+id/et_network_secret"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="@string/easytier_network_secret"
+        android:inputType="textPassword"
+        android:text="qzrs_secret" />
+
+      <EditText
+        android:id="@+id/et_ipv4"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="@string/easytier_ipv4"
+        android:inputType="text"
+        android:text="10.126.126.2/24" />
+
+      <EditText
+        android:id="@+id/et_peer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="@string/easytier_peer"
+        android:inputType="textUri" />
+
+      <EditText
+        android:id="@+id/et_proxy"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="@string/easytier_proxy"
+        android:inputType="text" />
+
+      <TextView
+        android:id="@+id/tv_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="@string/easytier_stopped"
+        android:textColor="@color/onBackgroundSecond" />
+
+    </LinearLayout>
+  </ScrollView>
+
+  <Button
+    android:id="@+id/button_toggle"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_margin="16dp"
+    android:text="@string/easytier_start" />
+
+</LinearLayout>
