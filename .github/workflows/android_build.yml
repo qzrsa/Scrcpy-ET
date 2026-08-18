@@ -112,7 +112,6 @@ jobs:
           [target.aarch64-linux-android]
           linker = "$CLANG"
           EOF
-          cd Scrcpy/easytier-lib
           # A cdylib (.so) MUST link the C runtime dynamically. The +crt-static flag
           # (used for static binaries, see easytier-android-build) makes cargo reject
           # a cdylib with "does not support these crate types", so force -crt-static.
@@ -135,11 +134,17 @@ jobs:
           export BINDGEN_EXTRA_CLANG_ARGS_aarch64-linux-android="--sysroot=$SYSROOT"
           export TARGET_CC="$TOOLCHAIN/bin/aarch64-linux-android21-clang"
           export TARGET_CFLAGS="--sysroot=$SYSROOT"
-          RUSTFLAGS="-C target-feature=-crt-static" cargo build --release --target aarch64-linux-android 2>&1 | tee easytier_build.log
-          if [ -f target/aarch64-linux-android/release/libeasytier_android.so ]; then
-            mkdir -p ../app/src/main/jniLibs/arm64-v8a
-            cp target/aarch64-linux-android/release/libeasytier_android.so ../app/src/main/jniLibs/arm64-v8a/
-            ls -l ../app/src/main/jniLibs/arm64-v8a/
+          # Write the log to an absolute, cd-independent path so the upload step
+          # (which runs from the repo root) can always find it.
+          LOG="$GITHUB_WORKSPACE/easytier_build.log"
+          : > "$LOG"
+          echo "PWD=$(pwd)" >> "$LOG"
+          echo "cargo build --manifest-path Scrcpy/easytier-lib/Cargo.toml --release --target aarch64-linux-android" >> "$LOG"
+          RUSTFLAGS="-C target-feature=-crt-static" cargo build --manifest-path Scrcpy/easytier-lib/Cargo.toml --release --target aarch64-linux-android 2>&1 | tee -a "$LOG"
+          if [ -f Scrcpy/easytier-lib/target/aarch64-linux-android/release/libeasytier_android.so ]; then
+            mkdir -p Scrcpy/app/src/main/jniLibs/arm64-v8a
+            cp Scrcpy/easytier-lib/target/aarch64-linux-android/release/libeasytier_android.so Scrcpy/app/src/main/jniLibs/arm64-v8a/
+            ls -l Scrcpy/app/src/main/jniLibs/arm64-v8a/
           else
             echo "Build did not produce libeasytier_android.so (see easytier_build.log)"
           fi
@@ -149,20 +154,14 @@ jobs:
         # (public-repo release assets are downloadable without auth) so the log can
         # be inspected remotely and the exact error pinpointed.
         if: failure()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ci-log-${{ github.run_id }}
+          name: EasyTier build log (${{ github.run_id }})
+          prerelease: true
+          files: ${{ github.workspace }}/easytier_build.log
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          LOG=Scrcpy/easytier-lib/easytier_build.log
-          if [ -f "$LOG" ]; then
-            gh release create "ci-log-${{ github.run_id }}" "$LOG" \
-              --repo "${{ github.repository }}" \
-              --title "EasyTier build log (${{ github.run_id }})" \
-              --notes "Auto-uploaded cargo build log from failed CI run ${{ github.run_id }}." \
-              --prerelease
-            echo "Uploaded build log to release ci-log-${{ github.run_id }}"
-          else
-            echo "No build log produced; apt/cargo may have failed before output."
-          fi
 
       - name: Grant execute permission for gradlew
         run: chmod +x Scrcpy/gradlew
